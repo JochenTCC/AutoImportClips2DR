@@ -133,7 +133,7 @@ class ResolveIngestGUI:
         self.lbl_format = tk.Label(self.frame_options, text="Format für Unterordner:", bg=self.bg_color, fg=self.fg_color)
         self.lbl_format.pack(side=tk.LEFT, padx=10, pady=10)
         
-        # Formate Definition (Listen-Reihenfolge sichern für Index-Zugriff)
+        # Formate Definition
         self.format_keys = [
             "1. Datum in Kurzform (YYMMDD)",
             "2. Wochentag in Kurzform (Mo, Di, ...)",
@@ -177,19 +177,15 @@ class ResolveIngestGUI:
         if not os.path.exists(footage_dir):
             return None
             
-        # Durchsuche die Kamera-Ordner nach Unterordnern
         for cam_folder in os.listdir(footage_dir):
             cam_path = os.path.join(footage_dir, cam_folder)
             if os.path.isdir(cam_path):
                 for sub_folder in os.listdir(cam_path):
                     if os.path.isdir(os.path.join(cam_path, sub_folder)):
-                        # Match 1: Durchgezählte Tage ("Tag-01", etc.)
                         if re.match(r'^Tag-\d+$', sub_folder):
                             return "COUNTER"
-                        # Match 2: Datum in Kurzform (Exakt 6 Ziffern)
                         if re.match(r'^\d{6}$', sub_folder):
                             return "YYMMDD"
-                        # Match 3: Wochentag (Kurzform Deutsch)
                         if sub_folder in WEEKDAYS_DE:
                             return "WEEKDAY"
         return None
@@ -205,11 +201,9 @@ class ResolveIngestGUI:
                     p_name = proj.GetName()
                     self.lbl_project.config(text=f"Aktives Resolve-Projekt: {p_name}", fg="#5CACEE")
                     
-                    # Überprüfung auf bestehende Ordnerstrukturen ausführen
                     detected = self.detect_existing_format(p_name)
                     if detected:
                         self.format_permanently_locked = True
-                        # Passenden Index in der Combobox auswählen
                         if detected == "YYMMDD":
                             self.combo_format.current(0)
                         elif detected == "WEEKDAY":
@@ -255,7 +249,6 @@ class ResolveIngestGUI:
             
             project_name = current_project.GetName()
             
-            # Startdatum aus dem Projektnamen parsen
             project_start_date = extract_start_date_from_name(project_name)
             
             if format_mode == "COUNTER" and not project_start_date:
@@ -314,4 +307,65 @@ class ResolveIngestGUI:
                         if format_mode == "YYMMDD":
                             sub_folder_name = day_obj.strftime('%y%m%d')
                         elif format_mode == "WEEKDAY":
-                            sub_folder_
+                            sub_folder_name = WEEKDAYS_DE[day_obj.weekday()]
+                        elif format_mode == "COUNTER":
+                            delta_days = (day_obj - project_start_date).days
+                            projekttag_nummer = delta_days + 1
+                            
+                            if projekttag_nummer < 1:
+                                sub_folder_name = f"Tag-VorStart_{day_obj.strftime('%y%m%d')}"
+                            else:
+                                sub_folder_name = f"Tag-{str(projekttag_nummer).zfill(2)}"
+                        
+                        day_target_dir = os.path.join(cam_base_target_dir, sub_folder_name)
+                        os.makedirs(day_target_dir, exist_ok=True)
+                        
+                        self.log(f"   -> Übertrage Clips vom Kalendertag '{day_str}' nach Ziel: {sub_folder_name} ...")
+                        
+                        for file_path in date_groups[day_str]:
+                            file_name = os.path.basename(file_path)
+                            cmd = ["robocopy", os.path.dirname(file_path), day_target_dir, file_name, "/XO", "/NJH", "/NJS", "/NDL", "/NC", "/NS"]
+                            subprocess.run(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        
+                        day_bin = get_or_create_bin(media_pool, cam_bin, sub_folder_name)
+                        media_pool.SetCurrentFolder(day_bin)
+                        
+                        clips_to_import = get_media_files_from_dir(day_target_dir)
+                        if clips_to_import:
+                            self.log(f"   -> Importiere {len(clips_to_import)} Clips in Bin: {label} -> {sub_folder_name}")
+                            media_pool.ImportMedia(clips_to_import)
+                else:
+                    self.log(f"-> Synchronisiere alle Dateien direkt nach: {cam_base_target_dir} ...")
+                    cmd = ["robocopy", source_drive, cam_base_target_dir, "/E", "/XO", "/NJH", "/NJS", "/NDL", "/NC", "/NS"]
+                    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=True, text=True, bufsize=1)
+                    for line in process.stdout:
+                        if line.strip():
+                            self.log(f"  > {line.strip()}")
+                    process.wait()
+                    
+                    media_pool.SetCurrentFolder(cam_bin)
+                    clips_to_import = get_media_files_from_dir(cam_base_target_dir)
+                    
+                    if clips_to_import:
+                        self.log(f"Importiere {len(clips_to_import)} Clips in Resolve Bin 'Footage -> {label}'...")
+                        media_pool.ImportMedia(clips_to_import)
+                    else:
+                        self.log("Keine neuen Clips zum Importieren gefunden.")
+                        
+            if cards_processed == 0:
+                self.log("\n[FERTIG] Keine der Karten enthielt relevante Mediendateien.")
+            else:
+                self.log("\n[FERTIG] Synchronisation und Import erfolgreich beendet!")
+                
+        except Exception as e:
+            self.log(f"\n[UNERWARTETER FEHLER] {e}")
+        finally:
+            self.root.after(0, lambda: self.btn_sync.config(state=tk.NORMAL))
+            if not self.format_permanently_locked:
+                self.root.after(0, lambda: self.combo_format.config(state="readonly"))
+
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = ResolveIngestGUI(root)
+    root.mainloop()
