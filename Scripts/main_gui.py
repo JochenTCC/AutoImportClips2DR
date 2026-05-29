@@ -165,7 +165,3 @@ class ResolveIngestGUI:
         except Exception:
             pass
 
-if __name__ == "__main__":
-    root = tk.Tk()
-    app = ResolveIngestGUI(root)
-    root.mainloop()
