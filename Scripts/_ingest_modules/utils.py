@@ -4,7 +4,9 @@ import string
 import ctypes
 import re
 from datetime import datetime
-from config import VALID_EXTENSIONS, DRIVE_REMOVABLE
+
+# Relativer Import der Config innerhalb desselben Ordners
+from .config import VALID_EXTENSIONS, DRIVE_REMOVABLE
 
 def has_media_files(source_dir):
     """Prüft rekursiv, ob die SD-Karte relevante Mediendateien enthält."""
@@ -15,13 +17,22 @@ def has_media_files(source_dir):
     return False
 
 def get_media_files_from_dir(target_dir):
-    """Listet alle Mediendateien im Zielordner auf."""
+    """Listet alle Mediendateien im Zielordner auf (nur oberste Ebene, um Verschachtelung zu vermeiden)."""
     media_files = []
-    for root, _, files in os.walk(target_dir):
+    if os.path.exists(target_dir):
+        for file in os.listdir(target_dir):
+            if file.lower().endswith(VALID_EXTENSIONS):
+                media_files.append(os.path.join(target_dir, file))
+    return media_files
+
+def get_media_files_flattened(source_dir):
+    """Sammelt alle Mediendateien einer Karte flach in einer Liste (ignoriert die Quellordner-Struktur)."""
+    all_files = []
+    for root, _, files in os.walk(source_dir):
         for file in files:
             if file.lower().endswith(VALID_EXTENSIONS):
-                media_files.append(os.path.join(root, file))
-    return media_files
+                all_files.append(os.path.join(root, file))
+    return all_files
 
 def get_connected_sd_cards():
     """Scannt alle Windows-Laufwerke nach Wechselmedien."""

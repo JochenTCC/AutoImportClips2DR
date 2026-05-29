@@ -6,13 +6,14 @@ import tkinter as tk
 from tkinter import scrolledtext
 from tkinter import ttk
 
-from config import BASE_TARGET_DIR, WEEKDAYS_DE
-from ingest_worker import run_ingest_process
+# Importe aus dem Unterordner
+from _ingest_modules.config import BASE_TARGET_DIR, WEEKDAYS_DE, VALID_EXTENSIONS
+from _ingest_modules.ingest_worker import run_ingest_process
 
 class ResolveIngestGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("Resolve Ingest Automation (Modular Build)")
+        self.root.title("Resolve Ingest Automation (Modular)")
         self.root.geometry("750x660")
         self.root.minsize(650, 500)
         
@@ -23,12 +24,10 @@ class ResolveIngestGUI:
         self.root.configure(bg=self.bg_color)
         self.format_permanently_locked = False
         
-        # 1. Projekt-Label
         self.lbl_project = tk.Label(root, text="Suche aktives DaVinci Resolve Projekt...", 
                                     font=("Helvetica", 12, "bold"), bg=self.bg_color, fg=self.fg_color)
         self.lbl_project.pack(pady=10)
         
-        # 2. Frame für Ordnerstruktur
         self.frame_options = tk.LabelFrame(root, text=" Strukturierung der Tagesordner ", 
                                            font=("Helvetica", 9, "bold"), bg=self.bg_color, fg="#5CACEE", bd=1)
         self.frame_options.pack(pady=5, padx=15, fill=tk.X)
@@ -53,7 +52,6 @@ class ResolveIngestGUI:
         self.combo_format.current(0)
         self.combo_format.pack(side=tk.LEFT, padx=10, pady=10, fill=tk.X, expand=True)
         
-        # 3. Frame für Proxy-Einstellungen
         self.frame_proxy_settings = tk.LabelFrame(root, text=" Proxy-Videoeinstellungen (NVIDIA NVENC beschleunigt) ", 
                                                  font=("Helvetica", 9, "bold"), bg=self.bg_color, fg="#5CACEE", bd=1)
         self.frame_proxy_settings.pack(pady=10, padx=15, fill=tk.X)
@@ -66,7 +64,6 @@ class ResolveIngestGUI:
         self.combo_codec.current(0)
         self.combo_codec.pack(side=tk.LEFT, padx=10, pady=10, fill=tk.X, expand=True)
         
-        # 4. Button & Log-Fenster
         self.btn_sync = tk.Button(root, text="SD-Karten synchronisieren, konvertieren & importieren", 
                                   command=self.start_sync_thread, font=("Helvetica", 11, "bold"),
                                   bg=self.btn_color, fg="white", activebackground="#CD3700", 
@@ -88,9 +85,15 @@ class ResolveIngestGUI:
         footage_dir = os.path.join(project_dir, "Footage")
         if not os.path.exists(footage_dir):
             return None
+            
         for cam_folder in os.listdir(footage_dir):
             cam_path = os.path.join(footage_dir, cam_folder)
             if os.path.isdir(cam_path):
+                for item in os.listdir(cam_path):
+                    item_path = os.path.join(cam_path, item)
+                    if os.path.isfile(item_path) and item.lower().endswith(VALID_EXTENSIONS):
+                        return "NONE"
+                
                 for sub_folder in os.listdir(cam_path):
                     if os.path.isdir(os.path.join(cam_path, sub_folder)):
                         if re.match(r'^Tag-\d+$', sub_folder):
@@ -117,6 +120,7 @@ class ResolveIngestGUI:
                         if detected == "YYMMDD": self.combo_format.current(0)
                         elif detected == "WEEKDAY": self.combo_format.current(1)
                         elif detected == "COUNTER": self.combo_format.current(2)
+                        elif detected == "NONE": self.combo_format.current(3)
                         self.combo_format.config(state=tk.DISABLED)
                         self.frame_options.config(text=" Strukturierung (Gesperrt: Format aus bestehendem Ingest erkannt) ", fg="#FFCC00")
                     else:
@@ -137,27 +141,17 @@ class ResolveIngestGUI:
         format_mode = self.formats[selected_display_name]
         use_h265 = "H.265" in self.combo_codec.get()
         
-        # Worker im Hintergrund-Thread starten und Log-Funktion übergeben
         threading.Thread(
             target=run_ingest_process, 
             args=(format_mode, use_h265, self.log), 
             daemon=True
         ).start()
         
-        # Prüfschleife für das Thread-Ende aktivieren
-        self.root.after(100, self.monitor_thread)
+        self.root.after(500, self.monitor_thread)
 
     def monitor_thread(self):
-        # Suchen nach aktiven Threads, die aus dem Ingest-Worker stammen
-        worker_alive = any(t.name == "Thread-1" or "run_ingest_process" in str(t) for t in threading.enumerate())
-        
-        # Da wir 'daemon=True' nutzen und der Thread asynchron läuft, entsperren wir die GUI 
-        # am sichersten über das Callback-Ende oder periodische Abfrage. 
-        # Um es absolut robust zu halten, nutzen wir hier das finale Signal aus dem Worker.
-        # Da run_ingest_process intern über ein try-finally oder am Ende fertig meldet,
-        # überwachen wir hier, ob das Log "beendet!" oder "FEHLER" enthält, um die GUI freizugeben.
         log_content = self.log_area.get("1.0", tk.END)
-        if "beendet!" in log_content or "[FEHLER]" in log_content or "Unerwarteter Fehler" in log_content:
+        if "[FERTIG]" in log_content or "[FEHLER]" in log_content or "UNERWARTETER FEHLER" in log_content:
             self.unlock_gui_safely()
         else:
             self.root.after(500, self.monitor_thread)

@@ -3,10 +3,12 @@ import os
 import subprocess
 import sys
 from datetime import datetime
-from config import BASE_TARGET_DIR, BASE_PROXY_DIR, PROXY_ELIGIBLE_EXTENSIONS, WEEKDAYS_DE
-from utils import (
+
+# Relative Importe innerhalb des Modulordners
+from .config import BASE_TARGET_DIR, BASE_PROXY_DIR, PROXY_ELIGIBLE_EXTENSIONS, WEEKDAYS_DE
+from .utils import (
     get_connected_sd_cards, has_media_files, get_media_dates_from_card,
-    extract_start_date_from_name, get_media_files_from_dir
+    extract_start_date_from_name, get_media_files_from_dir, get_media_files_flattened
 )
 
 def get_or_create_bin(media_pool, parent_folder, name):
@@ -18,7 +20,7 @@ def get_or_create_bin(media_pool, parent_folder, name):
     return media_pool.AddSubFolder(parent_folder, name)
 
 def run_ingest_process(format_mode, use_h265, log_callback):
-    """Führt den gesamten Kopiervorgang und das Rendering aus (läuft im Thread)."""
+    """Führt den gesamten Kopiervorgang und das Rendering flach oder strukturiert aus."""
     try:
         import DaVinciResolveScript as dvr_script
         resolve = dvr_script.scriptapp("Resolve")
@@ -59,14 +61,15 @@ def run_ingest_process(format_mode, use_h265, log_callback):
             
             cam_base_target_dir = os.path.join(footage_dir, label)
             cam_base_proxy_dir = os.path.join(project_proxy_dir, label)
+            os.makedirs(cam_base_target_dir, exist_ok=True)
             
             footage_bin = get_or_create_bin(media_pool, root_folder, "Footage")
             cam_bin = get_or_create_bin(media_pool, footage_bin, label)
             
-            date_groups = get_media_dates_from_card(source_drive)
-            sorted_days = sorted(list(date_groups.keys()))
-            
             if format_mode != "NONE":
+                date_groups = get_media_dates_from_card(source_drive)
+                sorted_days = sorted(list(date_groups.keys()))
+                
                 for day_str in sorted_days:
                     day_obj = datetime.strptime(day_str, '%Y-%m-%d')
                     if format_mode == "YYMMDD": sub_folder_name = day_obj.strftime('%y%m%d')
@@ -100,9 +103,13 @@ def run_ingest_process(format_mode, use_h265, log_callback):
                                     clip_path_on_disk = os.path.join(day_target_dir, clip_name)
                                     raw_queue.append((clip, clip_path_on_disk, day_proxy_dir))
             else:
-                log_callback(f"   -> Kopiere Clips direkt nach: Footage/{label}")
-                cmd = ["robocopy", source_drive, cam_base_target_dir, "/E", "/XO", "/NJH", "/NJS", "/NDL", "/NC", "/NS"]
-                subprocess.run(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                log_callback(f"   -> Kopiere Clips flach nach: Footage/{label}")
+                flattened_files = get_media_files_flattened(source_drive)
+                
+                for file_path in flattened_files:
+                    file_name = os.path.basename(file_path)
+                    cmd = ["robocopy", os.path.dirname(file_path), cam_base_target_dir, file_name, "/XO", "/NJH", "/NJS", "/NDL", "/NC", "/NS"]
+                    subprocess.run(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 
                 media_pool.SetCurrentFolder(cam_bin)
                 clips_on_disk = get_media_files_from_dir(cam_base_target_dir)
@@ -152,24 +159,30 @@ def run_ingest_process(format_mode, use_h265, log_callback):
                     codec_label = "H.265" if use_h265 else "H.264"
                     log_callback(f"   [{idx}/{total_jobs}] Rendere {codec_label}-Proxy: {clip_name} ...")
                     
+                    filter_str = "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2"
+                    
                     cmd = [
                         "ffmpeg", "-y",
                         "-hwaccel", "cuda",
                         "-i", source_path
                     ] + video_codec_args + [
-                        "-vf", r"scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2",
+                        "-vf", filter_str,
                         "-c:a", "copy",
                         expected_proxy_path
                     ]
                     
                     try:
-                        subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True, startupinfo=startupinfo)
+                        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True, startupinfo=startupinfo)
                         if os.path.exists(expected_proxy_path):
                             success = clip.LinkProxyMedia(expected_proxy_path)
                             if success:
                                 log_callback(f"       -> [OK] Proxy erfolgreich verknüpft.")
-                    except subprocess.CalledProcessError:
+                    except subprocess.CalledProcessError as e:
                         log_callback(f"       -> [FEHLER] FFmpeg-Rendering fehlgeschlagen für {clip_name}")
+                        if e.stderr:
+                            error_lines = e.stderr.strip().split('\n')[-3:]
+                            for err_line in error_lines:
+                                log_callback(f"          | {err_line}")
                     except Exception as e:
                         log_callback(f"       -> [API FEHLER] Verknüpfung fehlgeschlagen: {e}")
             else:
