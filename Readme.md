@@ -23,8 +23,7 @@ Ein Automatisierungstool für DaVinci Resolve, um SD-Karten-Backups, Dateisortie
 ## ⚙️ Installation & Einrichtung
 
 ### 1. Vorbereitung
-Klonen oder lade das Repository in das Verzeichnis:
-`C:\Users\jochen\Documents\GitHub\AutoImportClips2DR\Scripts`
+Klonen oder lade das Repository in ein Verzeichnis deiner Wahl.
 
 ### 2. Konfiguration
 Passe die Pfade in der `config.json` an deine lokale Struktur an:
