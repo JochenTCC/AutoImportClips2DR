@@ -1,10 +1,27 @@
 #!/usr/bin/env python
 import os
+import json
 import re
 import threading
 import tkinter as tk
 from tkinter import scrolledtext
 from tkinter import ttk
+
+def load_config():
+    # Sucht die config.json im selben Verzeichnis wie das Skript
+    config_path = os.path.join(os.path.dirname(__file__), 'config.json')
+    if os.path.exists(config_path):
+        with open(config_path, 'r') as f:
+            return json.load(f)
+    return {}
+
+# Laden der Konfiguration
+config = load_config()
+
+# Zuweisung (mit Fallback-Werten, falls etwas in der JSON fehlt)
+ALL_MEDIA_DIR = config.get("ALL_MEDIA_DIR", r"D:\Benutzer\Jochen\Videos")
+BASE_TARGET_DIR = config.get("BASE_TARGET_DIR", r"D:\Benutzer\Jochen\Videos\01-Productions")
+BASE_PROXY_DIR = config.get("BASE_PROXY_DIR", r"D:\Benutzer\Jochen\Videos\04-DR-Folders\ProxyMedia")
 
 # Importe aus dem Unterordner
 from _ingest_modules.config import BASE_TARGET_DIR, WEEKDAYS_DE, VALID_EXTENSIONS
