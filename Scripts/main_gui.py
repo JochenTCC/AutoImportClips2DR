@@ -26,13 +26,14 @@ BASE_PROXY_DIR = config.get("BASE_PROXY_DIR", r"D:\Benutzer\Jochen\Videos\04-DR-
 # Importe aus dem Unterordner
 from _ingest_modules.config import BASE_TARGET_DIR, WEEKDAYS_DE, VALID_EXTENSIONS
 from _ingest_modules.ingest_worker import run_ingest_process
+from main_ColMgmt import automate_color_management_by_bin # Neu importiert für die Automatisierung
 
 class ResolveIngestGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("Resolve Ingest Automation (Modular)")
-        self.root.geometry("750x660")
-        self.root.minsize(650, 500)
+        self.root.geometry("750x720")  # Höhe angepasst für beide Optionen
+        self.root.minsize(650, 600)
         
         self.bg_color = "#242424"
         self.fg_color = "#E0E0E0"
@@ -41,16 +42,27 @@ class ResolveIngestGUI:
         self.root.configure(bg=self.bg_color)
         self.format_permanently_locked = False
         
+        # Style für Checkboxen anpassen (dunkles Design)
+        self.style = ttk.Style()
+        self.style.theme_use('default')
+        self.style.configure("Dark.TCheckbutton", background=self.bg_color, foreground=self.fg_color, focuscolor=self.bg_color)
+        self.style.map("Dark.TCheckbutton", background=[('disabled', self.bg_color)], foreground=[('disabled', '#888888')])
+        
         self.lbl_project = tk.Label(root, text="Suche aktives DaVinci Resolve Projekt...", 
                                     font=("Helvetica", 12, "bold"), bg=self.bg_color, fg=self.fg_color)
         self.lbl_project.pack(pady=10)
         
-        self.frame_options = tk.LabelFrame(root, text=" Strukturierung der Tagesordner ", 
+        # --- Bereich: Strukturierung & Automatisierung ---
+        self.frame_options = tk.LabelFrame(root, text=" Strukturierung & Automatisierung ", 
                                            font=("Helvetica", 9, "bold"), bg=self.bg_color, fg="#5CACEE", bd=1)
         self.frame_options.pack(pady=5, padx=15, fill=tk.X)
         
-        self.lbl_format = tk.Label(self.frame_options, text="Format für Unterordner:", bg=self.bg_color, fg=self.fg_color)
-        self.lbl_format.pack(side=tk.LEFT, padx=10, pady=10)
+        # Zeile 1: Format-Dropdown
+        self.frame_row1 = tk.Frame(self.frame_options, bg=self.bg_color)
+        self.frame_row1.pack(fill=tk.X, padx=5, pady=2)
+        
+        self.lbl_format = tk.Label(self.frame_row1, text="Format für Unterordner:", bg=self.bg_color, fg=self.fg_color)
+        self.lbl_format.pack(side=tk.LEFT, padx=5, pady=5)
         
         self.format_keys = [
             "1. Datum in Kurzform (YYMMDD)",
@@ -65,10 +77,37 @@ class ResolveIngestGUI:
             self.format_keys[3]: "NONE"
         }
         
-        self.combo_format = ttk.Combobox(self.frame_options, values=self.format_keys, state="readonly", width=45)
+        self.combo_format = ttk.Combobox(self.frame_row1, values=self.format_keys, state="readonly", width=45)
         self.combo_format.current(0)
-        self.combo_format.pack(side=tk.LEFT, padx=10, pady=10, fill=tk.X, expand=True)
+        self.combo_format.pack(side=tk.LEFT, padx=10, pady=5, fill=tk.X, expand=True)
         
+        # Zeile 2: Option für Pancake-Timelines
+        self.frame_row2 = tk.Frame(self.frame_options, bg=self.bg_color)
+        self.frame_row2.pack(fill=tk.X, padx=5, pady=2)
+        
+        self.var_create_pancakes = tk.BooleanVar(value=False) # Default: Nein
+        self.chk_pancakes = ttk.Checkbutton(
+            self.frame_row2, 
+            text="Clips automatisch in Kamera-Pancake-Timelines einfügen", 
+            variable=self.var_create_pancakes,
+            style="Dark.TCheckbutton"
+        )
+        self.chk_pancakes.pack(side=tk.LEFT, padx=5, pady=2)
+        
+        # Zeile 3: Option für automatisches Farbmanagement
+        self.frame_row3 = tk.Frame(self.frame_options, bg=self.bg_color)
+        self.frame_row3.pack(fill=tk.X, padx=5, pady=2)
+        
+        self.var_auto_col = tk.BooleanVar(value=True) # Default: Ja (Aktiviert)
+        self.chk_auto_col = ttk.Checkbutton(
+            self.frame_row3, 
+            text="Nach Import automatisch Input Color Space zuweisen (main_ColMgmt)", 
+            variable=self.var_auto_col,
+            style="Dark.TCheckbutton"
+        )
+        self.chk_auto_col.pack(side=tk.LEFT, padx=5, pady=2)
+        
+        # --- Bereich: Proxy-Einstellungen ---
         self.frame_proxy_settings = tk.LabelFrame(root, text=" Proxy-Videoeinstellungen (NVIDIA NVENC beschleunigt) ", 
                                                  font=("Helvetica", 9, "bold"), bg=self.bg_color, fg="#5CACEE", bd=1)
         self.frame_proxy_settings.pack(pady=10, padx=15, fill=tk.X)
@@ -138,11 +177,17 @@ class ResolveIngestGUI:
                         elif detected == "WEEKDAY": self.combo_format.current(1)
                         elif detected == "COUNTER": self.combo_format.current(2)
                         elif detected == "NONE": self.combo_format.current(3)
+                        
+                        # Alle Strukturierungs- und Automatisierungsoptionen einfrieren
                         self.combo_format.config(state=tk.DISABLED)
-                        self.frame_options.config(text=" Strukturierung (Gesperrt: Format aus bestehendem Ingest erkannt) ", fg="#FFCC00")
+                        self.chk_pancakes.config(state=tk.DISABLED)
+                        self.chk_auto_col.config(state=tk.DISABLED)
+                        self.frame_options.config(text=" Strukturierung & Automatisierung (Gesperrt: Einstellungen aus bestehendem Ingest aktiv) ", fg="#FFCC00")
                     else:
                         self.format_permanently_locked = False
                         self.combo_format.config(state="readonly")
+                        self.chk_pancakes.config(state=tk.NORMAL)
+                        self.chk_auto_col.config(state=tk.NORMAL)
                     return
             self.lbl_project.config(text="Kein geöffnetes Projekt in Resolve gefunden!", fg="#FF3030")
         except Exception:
@@ -151,18 +196,21 @@ class ResolveIngestGUI:
     def start_sync_thread(self):
         self.btn_sync.config(state=tk.DISABLED)
         self.combo_format.config(state=tk.DISABLED)
+        self.chk_pancakes.config(state=tk.DISABLED)
+        self.chk_auto_col.config(state=tk.DISABLED)
         self.combo_codec.config(state=tk.DISABLED)
         self.log_area.delete(1.0, tk.END)
         
         selected_display_name = self.combo_format.get()
         format_mode = self.formats[selected_display_name]
         use_h265 = "H.265" in self.combo_codec.get()
+        create_pancakes = self.var_create_pancakes.get()
         
         camera_colors = config.get("camera_colors", {})
 
         threading.Thread(
             target=run_ingest_process, 
-            args=(format_mode, use_h265, self.log, camera_colors),  # <-- camera_colors hier als 4. Argument übergeben
+            args=(format_mode, use_h265, self.log, create_pancakes, camera_colors),  
             daemon=True
         ).start()
         
@@ -171,6 +219,17 @@ class ResolveIngestGUI:
     def monitor_thread(self):
         log_content = self.log_area.get("1.0", tk.END)
         if "[FERTIG]" in log_content or "[FEHLER]" in log_content or "UNERWARTETER FEHLER" in log_content:
+            # Wenn Ingest beendet und Option aktiv ist, stoße das Farbmanagement an
+            if "[FERTIG]" in log_content and self.var_auto_col.get():
+                self.log("\n[AUTOMATISIERUNG] Starte Farbmanagement via Metadaten an...")
+                try:
+                    # Ausführung im Hauptthread für maximale Stabilität mit der Resolve API
+                    automate_color_management_by_bin()
+                    self.log("[AUTOMATISIERUNG] Farbräume erfolgreich zugewiesen!")
+                    self.log("[HINWEIS] Bitte bis auf Weiteres das \"Input Gamma\" manuell zuweisen!")
+                except Exception as col_err:
+                    self.log(f"[AUTOMATISIERUNG FEHLER] Fehler bei Farbraumzuweisung: {col_err}")
+                    
             self.unlock_gui_safely()
         else:
             self.root.after(500, self.monitor_thread)
@@ -181,6 +240,7 @@ class ResolveIngestGUI:
             self.combo_codec.config(state="readonly")
             if not self.format_permanently_locked:
                 self.combo_format.config(state="readonly")
+                self.chk_pancakes.config(state=tk.NORMAL)
+                self.chk_auto_col.config(state=tk.NORMAL)
         except Exception:
             pass
-

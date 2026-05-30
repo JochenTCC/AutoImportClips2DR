@@ -4,7 +4,7 @@ import subprocess
 import sys
 from datetime import datetime
 
-# Relative Importe innerhalb des Modulordners (oder direkt, je nach deiner Struktur)
+# Relative Importe innerhalb des Modulordners
 from .config import BASE_TARGET_DIR, BASE_PROXY_DIR, PROXY_ELIGIBLE_EXTENSIONS, WEEKDAYS_DE
 from .utils import (
     get_connected_sd_cards, has_media_files, get_media_dates_from_card,
@@ -53,22 +53,16 @@ def create_resolve_bins(media_pool, root_folder):
 
 
 def get_clip_color_by_label(label, camera_colors):
-    """
-    Ermittelt die DaVinci Resolve Clip-Farbe dynamisch aus der config.json.
-    Matcht herstellerunabhängig (z.B. findet 'S5II' auch wenn 'LUMIX' fehlt).
-    Fällt auf 'marine' zurück, wenn kein Treffer erzielt wird.
-    """
+    """Ermittelt die DaVinci Resolve Clip-Farbe dynamisch aus der config.json."""
     label_upper = label.upper()
     
-    # 1. Durchlauf: Präzise Suche nach Splitting-Elementen (z.B. nach "S5II", "AVATA2")
     for key, color in camera_colors.items():
         key_upper = key.upper()
         parts = key_upper.split('_')
         for part in parts:
             if len(part) > 2 and part in label_upper: 
-                return color.lower()  # .lower() stellt sicher, dass Resolve es schluckt
+                return color.lower()
                 
-    # 2. Durchlauf: Allgemeiner Fallback
     for key, color in camera_colors.items():
         if key.upper() in label_upper:
             return color.lower()
@@ -76,18 +70,33 @@ def get_clip_color_by_label(label, camera_colors):
     return "marine"
 
 
+def tag_media_pool_items(clips, group_keyword, log_callback):
+    """
+    Weist importierten Media-Pool-Items direkt das Kamera-Metadaten-Tag zu.
+    Garantiert die Funktion der Smart Filter, auch wenn keine Pancake-Timelines genutzt werden.
+    """
+    try:
+        updated_count = 0
+        for clip in clips:
+            if clip:
+                success = clip.SetMetadata("Camera Type", group_keyword)
+                if success:
+                    updated_count += 1
+        if updated_count > 0:
+            log_callback(f"       [OK] {updated_count} Clip(s) mit Metadaten-Tag '{group_keyword}' versehen.")
+    except Exception as e:
+        log_callback(f"       [HINWEIS] Fehler bei der Metadaten-Direktzuweisung: {e}")
+
+
 def process_single_sd_card(label, source_drive, format_mode, project_start_date, 
-                           footage_dir, project_proxy_dir, media_pool, footage_bin, 
-                           pancakes_bin, log_callback, raw_queue, camera_colors):
-    """Verarbeitet eine einzelne SD-Karte: Kopiert Daten, färbt Clips ein und bereitet die Proxy-Queue vor."""
+                           footage_dir, project_proxy_dir, current_project, media_pool, footage_bin, 
+                           pancakes_bin, create_pancakes, log_callback, raw_queue, camera_colors):
+    """Verarbeitet eine einzelne SD-Karte mit optionaler Timeline-Generierung."""
     log_callback(f"\n[GEFUNDEN] Verarbeite Karte '{label}'...")
     
-    # Holt die Farbe basierend auf deinen JSON-Definitionen
     clip_color = get_clip_color_by_label(label, camera_colors)
     log_callback(f"   -> Zugewiesene Resolve-Clipfarbe: {clip_color}")
     
-    # Ermittle den reinen Kameratyp für das Namens-Template (z.B. S5II, AVATA2, MINI)
-    # Wenn kein Match in den JSON-Schlüsseln gefunden wird, nutzen wir das SD-Karten-Label als Fallback
     camera_type = "UNKNOWN"
     label_upper = label.upper()
     for key in camera_colors.keys():
@@ -102,20 +111,19 @@ def process_single_sd_card(label, source_drive, format_mode, project_start_date,
         if matched:
             break
     if camera_type == "UNKNOWN":
-        # Zweiter Versuch über den vollen JSON-Schlüssel, falls kein Unterstrich vorhanden war
         for key in camera_colors.keys():
             if key.upper() in label_upper:
                 camera_type = key.upper()
                 break
         else:
-            camera_type = label  # Fallback auf das komplette Label
+            camera_type = label
             
     cam_base_target_dir = os.path.join(footage_dir, label)
     cam_base_proxy_dir = os.path.join(project_proxy_dir, label)
     os.makedirs(cam_base_target_dir, exist_ok=True)
     
-    # Kamera-Bin wird immer innerhalb von "Footage" erstellt
     cam_bin = get_or_create_bin(media_pool, footage_bin, label)
+    group_keyword = f"{camera_type}"
     
     if format_mode != "NONE":
         date_groups = get_media_dates_from_card(source_drive)
@@ -141,27 +149,27 @@ def process_single_sd_card(label, source_drive, format_mode, project_start_date,
                 cmd = ["robocopy", os.path.dirname(file_path), day_target_dir, file_name, "/XO", "/NJH", "/NJS", "/NDL", "/NC", "/NS"]
                 subprocess.run(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             
-            # 1. Bins in Resolve holen oder erstellen
             day_bin = get_or_create_bin(media_pool, cam_bin, sub_folder_name)
+            pancake_timeline = None
             
-            # ÄNDERUNG: Erstellt einen eigenen Tages-Bin für den spezifischen Tag im Hauptordner "Pancakes"
-            day_pancake_bin = get_or_create_bin(media_pool, pancakes_bin, sub_folder_name)
+            # TIMELINE-LOGIK: Nur ausführen, wenn in der GUI ausgewählt
+            if create_pancakes:
+                day_pancake_bin = get_or_create_bin(media_pool, pancakes_bin, sub_folder_name)
+                media_pool.SetCurrentFolder(day_pancake_bin)
+                timeline_name = f"PC_{sub_folder_name}_{camera_type}"
+                
+                existing_items = day_pancake_bin.GetClipList()
+                for item in existing_items:
+                    if item.GetClipProperty("Type") == "Timeline" and item.GetName() == timeline_name:
+                        pancake_timeline = item
+                        break
+                
+                if not pancake_timeline:
+                    log_callback(f"   -> Erstelle Kamera-Pancake: {timeline_name}")
+                    pancake_timeline = media_pool.CreateEmptyTimeline(timeline_name)
+                else:
+                    log_callback(f"   -> Pancake-Timeline existiert bereits: {timeline_name} (wird erweitert)")
             
-            # Wir wechseln den Fokus auf den Pancake-Tages-Bin, um die Timeline dort zu platzieren
-            media_pool.SetCurrentFolder(day_pancake_bin)
-            
-            # ÄNDERUNG: Neues Namens-Template "PC_TagesFormat_Kameratyp" (z.B. PC_260530_S5II)
-            timeline_name = f"PC_{sub_folder_name}_{camera_type}"
-            
-            # Prüfen, ob die spezifische Kamera-Timeline an diesem Tag bereits existiert
-            existing_items = day_pancake_bin.GetClipList()
-            timeline_exists = any(item.GetClipProperty("Type") == "Timeline" and item.GetName() == timeline_name for item in existing_items)
-            
-            if not timeline_exists:
-                log_callback(f"   -> Erstelle Kamera-Pancake: {timeline_name}")
-                media_pool.CreateEmptyTimeline(timeline_name)
-            
-            # Fokus für den anschließenden Medien-Import wieder zurück auf den Footage-Tages-Bin setzen
             media_pool.SetCurrentFolder(day_bin)
             
             clips_on_disk = get_media_files_from_dir(day_target_dir)
@@ -169,9 +177,10 @@ def process_single_sd_card(label, source_drive, format_mode, project_start_date,
                 new_clips = media_pool.ImportMedia(clips_on_disk)
                 if new_clips:
                     clip_list = new_clips if isinstance(new_clips, list) else [new_clips]
+                    valid_clips_to_add = []
+                    
                     for clip in clip_list:
                         if not clip: continue
-                        
                         try:
                             clip.SetClipProperty("Clip Color", clip_color)
                         except Exception as color_err:
@@ -181,8 +190,38 @@ def process_single_sd_card(label, source_drive, format_mode, project_start_date,
                         if clip_name.lower().endswith(PROXY_ELIGIBLE_EXTENSIONS):
                             clip_path_on_disk = os.path.join(day_target_dir, clip_name)
                             raw_queue.append((clip, clip_path_on_disk, day_proxy_dir))
+                        
+                        valid_clips_to_add.append(clip)
+                    
+                    # Metadaten-Tagging direkt im Media-Pool durchführen
+                    tag_media_pool_items(valid_clips_to_add, group_keyword, log_callback)
+                    
+                    # Clips zur Timeline hinzufügen, falls aktiviert
+                    if create_pancakes and pancake_timeline and valid_clips_to_add:
+                        try:
+                            valid_clips_to_add.sort(key=lambda c: c.GetClipProperty("Start TC"))
+                        except Exception as sort_err:
+                            log_callback(f"       [HINWEIS] Chronologische Sortierung nach TC fehlgeschlagen: {sort_err}")
+                            
+                        current_project.SetCurrentTimeline(pancake_timeline)
+                        existing_timeline_items = pancake_timeline.GetItemListInTrack("video", 1)
+                        existing_clip_names = set()
+                        
+                        if existing_timeline_items:
+                            for item in existing_timeline_items:
+                                mp_item = item.GetMediaPoolItem()
+                                if mp_item:
+                                    existing_clip_names.add(mp_item.GetName())
+                        
+                        clips_to_append = [c for c in valid_clips_to_add if c.GetName() not in existing_clip_names]
+                        
+                        if clips_to_append:
+                            log_callback(f"   -> Füge {len(clips_to_append)} neue(n) Clip(s) der Timeline hinzu...")
+                            media_pool.AppendToTimeline(clips_to_append)
+                        else:
+                            log_callback("   -> Keine neuen Clips zum Hinzufügen (bereits in Timeline vorhanden).")
     else:
-        # Im flachen Modus (format_mode == "NONE") legen wir das Pancake direkt im Pancakes-Haupt-Bin an
+        # Im flachen Modus (format_mode == "NONE")
         log_callback(f"   -> Kopiere Clips flach nach: Footage/{label}")
         flattened_files = get_media_files_flattened(source_drive)
         
@@ -193,27 +232,33 @@ def process_single_sd_card(label, source_drive, format_mode, project_start_date,
         
         media_pool.SetCurrentFolder(cam_bin)
         clips_on_disk = get_media_files_from_dir(cam_base_target_dir)
+        pancake_timeline = None
         
-        # Fokus auf Pancakes-Hauptordner setzen
-        media_pool.SetCurrentFolder(pancakes_bin)
-        timeline_name = f"PC_FLAT_{camera_type}"
-        existing_items = pancakes_bin.GetClipList()
-        timeline_exists = any(item.GetClipProperty("Type") == "Timeline" and item.GetName() == timeline_name for item in existing_items)
-        
-        if not timeline_exists:
-            log_callback(f"   -> Erstelle Kamera-Pancake: {timeline_name}")
-            media_pool.CreateEmptyTimeline(timeline_name)
+        if create_pancakes:
+            media_pool.SetCurrentFolder(pancakes_bin)
+            timeline_name = f"PC_FLAT_{camera_type}"
+            existing_items = pancakes_bin.GetClipList()
+            for item in existing_items:
+                if item.GetClipProperty("Type") == "Timeline" and item.GetName() == timeline_name:
+                    pancake_timeline = item
+                    break
             
-        # Zurück zum Kamera-Bin für den Medien-Import
+            if not pancake_timeline:
+                log_callback(f"   -> Erstelle Kamera-Pancake: {timeline_name}")
+                pancake_timeline = media_pool.CreateEmptyTimeline(timeline_name)
+            else:
+                log_callback(f"   -> Pancake-Timeline existiert bereits: {timeline_name} (wird erweitert)")
+            
         media_pool.SetCurrentFolder(cam_bin)
         
         if clips_on_disk:
             new_clips = media_pool.ImportMedia(clips_on_disk)
             if new_clips:
                 clip_list = new_clips if isinstance(new_clips, list) else [new_clips]
+                valid_clips_to_add = []
+                
                 for clip in clip_list:
                     if not clip: continue
-                    
                     try:
                         clip.SetClipProperty("Clip Color", clip_color)
                     except Exception as color_err:
@@ -224,7 +269,35 @@ def process_single_sd_card(label, source_drive, format_mode, project_start_date,
                         clip_path_on_disk = os.path.join(cam_base_target_dir, clip_name)
                         raw_queue.append((clip, clip_path_on_disk, cam_base_proxy_dir))
                         
+                    valid_clips_to_add.append(clip)
+                
+                tag_media_pool_items(valid_clips_to_add, group_keyword, log_callback)
+                
+                if create_pancakes and pancake_timeline and valid_clips_to_add:
+                    try:
+                        valid_clips_to_add.sort(key=lambda c: c.GetClipProperty("Start TC"))
+                    except Exception as sort_err:
+                        log_callback(f"       [HINWEIS] Chronologische Sortierung nach TC fehlgeschlagen: {sort_err}")
                         
+                    current_project.SetCurrentTimeline(pancake_timeline)
+                    existing_timeline_items = pancake_timeline.GetItemListInTrack("video", 1)
+                    existing_clip_names = set()
+                    
+                    if existing_timeline_items:
+                        for item in existing_timeline_items:
+                            mp_item = item.GetMediaPoolItem()
+                            if mp_item:
+                                existing_clip_names.add(mp_item.GetName())
+                    
+                    clips_to_append = [c for c in valid_clips_to_add if c.GetName() not in existing_clip_names]
+                    
+                    if clips_to_append:
+                        log_callback(f"   -> Füge {len(clips_to_append)} neue(n) Clip(s) der Timeline hinzu...")
+                        media_pool.AppendToTimeline(clips_to_append)
+                    else:
+                        log_callback("   -> Keine neuen Clips zum Hinzufügen (bereits in Timeline vorhanden).")
+
+
 def render_and_link_proxies(raw_queue, use_h265, log_callback):
     """Verarbeitet die Proxy-Queue und führt das FFmpeg-Rendering durch."""
     render_jobs = []
@@ -291,7 +364,7 @@ def render_and_link_proxies(raw_queue, use_h265, log_callback):
             log_callback(f"       -> [API FEHLER] Verknüpfung fehlgeschlagen: {e}")
 
 
-def run_ingest_process(format_mode, use_h265, log_callback, camera_colors=None):
+def run_ingest_process(format_mode, use_h265, log_callback, create_pancakes, camera_colors=None):
     """Haupt-Einstiegspunkt für den Ingest-Prozess."""
     if camera_colors is None:
         camera_colors = {}
@@ -312,15 +385,12 @@ def run_ingest_process(format_mode, use_h265, log_callback, camera_colors=None):
         project_name = current_project.GetName()
         project_start_date = extract_start_date_from_name(project_name)
         
-        # 1. Physikalische Ordner erstellen
         project_dir, footage_dir, project_proxy_dir = create_physical_directories(project_name)
         
-        # 2. Resolve Bins vorbereiten
         media_pool = current_project.GetMediaPool()
         root_folder = media_pool.GetRootFolder()
         footage_bin, pancakes_bin = create_resolve_bins(media_pool, root_folder)
         
-        # 3. SD-Karten-Verarbeitung
         detected_sd_cards = get_connected_sd_cards()
         if not detected_sd_cards:
             log_callback("\n[HINWEIS] Keine SD-Karten gefunden.")
@@ -335,14 +405,13 @@ def run_ingest_process(format_mode, use_h265, log_callback, camera_colors=None):
             
             process_single_sd_card(
                 label, source_drive, format_mode, project_start_date,
-                footage_dir, project_proxy_dir, media_pool, footage_bin,
-                pancakes_bin, log_callback, raw_queue, camera_colors
+                footage_dir, project_proxy_dir, current_project, media_pool, footage_bin,
+                pancakes_bin, create_pancakes, log_callback, raw_queue, camera_colors
             )
         
-        # 4. Proxy-Rendering
         if raw_queue:
             render_and_link_proxies(raw_queue, use_h265, log_callback)
         
-        log_callback("\n[FERTIG] Synchronisation, optimiertes Batch-Rendering und Proxy-Verknüpfungen beendet!")
+        log_callback("\n[FERTIG] Synchronisation, Metadaten-Tagging und Proxy-Verknüpfungen beendet!")
     except Exception as e:
         log_callback(f"\n[UNERWARTETER FEHLER] {e}")

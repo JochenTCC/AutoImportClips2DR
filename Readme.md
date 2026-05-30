@@ -8,12 +8,21 @@ Ein Automatisierungstool für DaVinci Resolve, um SD-Karten-Backups, Dateisortie
 * **Automatisierte Ordnerstruktur**: Sortierung nach Datum, Wochentag oder Projekttagen.
 * **Intelligentes Proxy-Handling**: Nutzt NVIDIA NVENC für extrem schnelles Proxy-Rendering (H.265/H.264).
 * **DaVinci Resolve Integration**: Importiert Clips direkt in die korrekten Media-Pool-Bins.
-* **Sicherer Workflow**: Verhindert redundante Prozesse durch Dateiprüfung.
+* **Pancake-Timelines**: Legt synchron zu den Footage-Bins auch Pancake-Timelines für jede Kamera an
+* **Kamera-Erkennung**: Erkennt den Kameratyp anhand des Labels der SD-Karte und setzt die Meta-Daten entsprechend für weitere Verarbeitungen.
+* Befüllt optional die Pancake-Timelines mit allen Clips in chronologischer Reihenfolge
+* Setzt optional den Color Space Kamera-spezifisch (für "DaVinci YRGB Color Managed")
+
 
 ---
 
+## Bemerkung
+* Derzeit funktioniert das Setzen des "Input Gamma" per API nicht korrekt. Daher muss das nach wie vor manuell gesetzt werden
+
+--- 
+
 ## 🛠 Voraussetzungen
-* **DaVinci Resolve** (Studio oder Free)
+* **DaVinci Resolve** (Studio)
 * **FFmpeg**: Muss im System-PATH installiert sein.
     * *Prüfung*: Gib in der CMD `ffmpeg -version` ein.
 * **Python 3.x**: Muss auf dem System vorhanden sein.
@@ -61,5 +70,10 @@ JSON{
 | config.json | Benutzerspezifische Pfadkonfiguration. | 
 
 ### 💡 Tipps
+* **Smart-Bins**: Durch das Erstellen von kameraspezifischen Smart-Bins können weitere Anpassungen schnell vorgenommen werden.
 * **.gitignore**: Achte darauf, eine .gitignore Datei anzulegen, um config.json (wegen privater Pfade) oder Log-Dateien nicht versehentlich mit hochzuladen.
 * **Fehlersuche**: Sollte das Skript nicht starten, prüfe die Datei script_error_log.txt auf deinem Desktop.
+
+### Offene ToDos
+* Automatisches Setzen des "Input Gamma", sobald das mit der API geht.
+* Verschieben der Kameratypen in die json-Datei - auch für flexible Erweiterbarkeit.
