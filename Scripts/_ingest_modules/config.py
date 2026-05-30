@@ -13,7 +13,7 @@ BASE_TARGET_DIR = r"D:\Benutzer\Jochen\Videos\01-Productions"
 BASE_PROXY_DIR = r"D:\Benutzer\Jochen\Videos\04-DR-Folders\ProxyMedia"
 
 # Dateiendungen und System-Konstanten
-VALID_EXTENSIONS = ('.mov', '.mp4', '.mxf', '.braw', '.wav', '.mp3', '.jpg', '.jpeg', '.png', '.arw', '.cr3')
+VALID_EXTENSIONS = ('.mov', '.mp4', '.mxf', '.braw', '.wav', '.mp3', '.jpg', '.jpeg', '.png', '.arw', '.cr3', '.rw2')
 PROXY_ELIGIBLE_EXTENSIONS = ('.mov', '.mp4', '.mxf', '.braw')
 DRIVE_REMOVABLE = 2
 

@@ -158,9 +158,11 @@ class ResolveIngestGUI:
         format_mode = self.formats[selected_display_name]
         use_h265 = "H.265" in self.combo_codec.get()
         
+        camera_colors = config.get("camera_colors", {})
+
         threading.Thread(
             target=run_ingest_process, 
-            args=(format_mode, use_h265, self.log), 
+            args=(format_mode, use_h265, self.log, camera_colors),  # <-- camera_colors hier als 4. Argument übergeben
             daemon=True
         ).start()
         
