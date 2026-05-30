@@ -10,45 +10,27 @@ def set_color_space_with_fallback(clip, clip_name, camera_type):
     """Versucht verschiedene bekannte Schreibweisen für den Farbraum zu setzen."""
     
     if camera_type == "DJI":
-        dji_variants = [
-            "DJI D-Gamut/D-Log",
-            "DJI D-Gamut",
-            "DJI D-Log"
-        ]
-        for variant in dji_variants:
-            if clip.SetClipProperty("Input Color Space", variant):
-                print(f"  -> [Erfolg DJI] {clip_name} -> '{variant}'")
-                return True
+        if clip.SetClipProperty("Input Color Space", "DJI D-Gamut"):
+            print(f"  -> [Erfolg DJI] {clip_name} -> '{"DJI D-Gamut"}'")
+            return True
         return False
 
     elif camera_type == "LUMIX":
-        # STRATEGIEÄNDERUNG: Wir setzen ERST das Gamma und DANN den Color Space.
-        # Manche Resolve-Versionen verriegeln das Gamma-Feld, wenn der Color Space zuerst kommt.
+        # Ursprünglicher, sauberer Ansatz: Getrenntes Setzen von Color Space und Gamma
+        # Reihenfolge: Erst Color Space, dann Gamma, um UI-Überschreibungen zu minimieren.
         
-        # 1. Schritt: Gamma erzwingen
-        gamma_success = False
-        gamma_variants = ["Panasonic V-Log", "V-Log"]
-        for g_variant in gamma_variants:
-            if clip.SetClipProperty("Input Gamma", g_variant):
-                gamma_success = True
-                break
-                
-        # 2. Schritt: Color Space erzwingen
-        space_success = False
-        space_variants = ["Panasonic V-Gamut", "Panasonic V-Gamut/V-Log", "V-Gamut"]
-        for s_variant in space_variants:
-            if clip.SetClipProperty("Input Color Space", s_variant):
-                space_success = True
-                break
-                
-        if gamma_success and space_success:
-            print(f"  -> [Erfolg Lumix] {clip_name} -> V-Gamut & V-Log getrennt gesetzt.")
+        success_space = clip.SetClipProperty("Input Color Space", "Panasonic V-Gamut")
+        success_gamma = clip.SetClipProperty("Input Gamma", "Panasonic V-Log")
+        
+        if success_space and success_gamma:
+            print(f"  -> [Erfolg LUMIX] {clip_name} -> Space und Gamma separat gesetzt.")
             return True
-        elif space_success:
-            print(f"  -> [Teilerfolg Lumix] {clip_name} -> Nur Color Space gesetzt (Gamma blockiert).")
+        elif success_space:
+            print(f"  -> [Teilerfolg LUMIX] {clip_name} -> Nur Color Space gesetzt (Gamma blockiert).")
             return True
-            
-        return False
+        else:
+            print(f"  -> [FEHLER] Konnte Farbmanagement für {clip_name} nicht setzen.")
+            return False
 
 def process_bin(folder, parent_camera_type=None):
     """Durchsucht rekursiv alle Bins und taggt die Clips."""
@@ -104,10 +86,10 @@ def automate_color_management_by_bin():
     media_pool = current_project.GetMediaPool()
     root_folder = media_pool.GetRootFolder()
     
-    print("\n--- Starte automatisches Farbmanagement mit Gamma-Priorität ---")
+    print("\n--- Starte automatisches Farbmanagement mit getrennten Zuweisungen ---")
     process_bin(root_folder)
     
-    # Projekt speichern, um UI-Refresh zu erzwingen
+    # Projekt保存, um UI-Refresh zu erzwingen
     project_manager.SaveProject()
     print("--- Fertig und Projekt gespeichert! ---\n")
 
