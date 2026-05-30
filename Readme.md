@@ -76,4 +76,3 @@ JSON{
 
 ### Offene ToDos
 * Automatisches Setzen des "Input Gamma", sobald das mit der API geht.
-* Verschieben der Kameratypen in die json-Datei - auch für flexible Erweiterbarkeit.

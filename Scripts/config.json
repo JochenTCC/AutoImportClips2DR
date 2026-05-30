@@ -2,6 +2,7 @@
     "ALL_MEDIA_DIR": "D:\\Benutzer\\Jochen\\Videos",
     "BASE_TARGET_DIR": "D:\\Benutzer\\Jochen\\Videos\\01-Productions",
     "BASE_PROXY_DIR": "D:\\Benutzer\\Jochen\\Videos\\04-DR-Folders\\ProxyMedia",
+    
     "camera_colors": {
         "LUMIX_S5II": "Orange",
         "LUMIX_S5D": "Apricot",
@@ -9,8 +10,46 @@
         "DJI_MINI": "Green",
         "DJI_AVATA2": "Teal",
         "DJI_AVATA360": "Navy",
-		"DJI_ACTION2": "Tan",
+        "DJI_ACTION2": "Tan",
         "DJI": "Blue",
         "INSTA": "Purple"
-    }
+    },
+
+    "camera_mappings": [
+        {
+            "search_keywords": ["S5II", "S5M2", "GH6"],
+            "camera_type": "LUMIX_S5II",
+            "input_color_space": "Panasonic V-Gamut"
+        },
+        {
+            "search_keywords": ["S5D", "S5K"],
+            "camera_type": "LUMIX_S5D",
+            "input_color_space": "Panasonic V-Gamut"
+        },
+        {
+            "search_keywords": ["MINI", "MINI4", "MINI3", "M4P"],
+            "camera_type": "DJI_MINI",
+            "input_color_space": "DJI D-Gamut"
+        },
+        {
+            "search_keywords": ["AVATA2"],
+            "camera_type": "DJI_AVATA2",
+            "input_color_space": "DJI D-Gamut"
+        },
+        {
+            "search_keywords": ["ACTION2", "ACT2"],
+            "camera_type": "DJI_ACTION2",
+            "input_color_space": "DJI D-Gamut"
+        },
+        {
+            "search_keywords": ["POCKET3", "OSMO3"],
+            "camera_type": "DJI",
+            "input_color_space": "DJI D-Gamut"
+        },
+        {
+            "search_keywords": ["X4", "X3", "X2", "ONE_R"],
+            "camera_type": "INSTA",
+            "input_color_space": "Project Baseline / Rec.709"
+        }
+    ]
 }

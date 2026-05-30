@@ -1,32 +1,61 @@
 #!/usr/bin/env python
 import os
 import sys
+import json
 
-def set_color_space_with_fallback(clip, clip_name, camera_type):
-    """Versucht verschiedene bekannte Schreibweisen für den Farbraum zu setzen."""
-    
-    # Vereinheitlichte Typen für den Abgleich
-    camera_type_upper = camera_type.upper()
-    
-    # Flexibler Match auf DJI Drohnen (z.B. AVATA2, MINI4PRO oder das direkte DJI-Tag)
-    if "DJI" in camera_type_upper or "AVATA" in camera_type_upper or "MINI" in camera_type_upper:
-        if clip.SetClipProperty("Input Color Space", "DJI D-Gamut"):
-            print(f"  -> [Erfolg DJI] {clip_name} -> 'DJI D-Gamut'")
-            return True
+def load_config():
+    """Sucht und lädt die config.json im selben Verzeichnis wie das Skript."""
+    config_path = os.path.join(os.path.dirname(__file__), 'config.json')
+    if os.path.exists(config_path):
+        with open(config_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    return {}
+
+# Konfiguration global laden
+CONFIG = load_config()
+
+def set_color_space_from_config(clip, clip_name, camera_type):
+    """Weist den Input Color Space basierend auf den Mappings in der config.json zu."""
+    if not camera_type:
         return False
-
-    # Flexibler Match auf Lumix-Modelle (z.B. S5II)
-    elif "LUMIX" in camera_type_upper or "S5" in camera_type_upper:
-        # GEÄNDERT: Korrekter Kombi-Farbraum 'Panasonic V-Gamut/V-Log' setzt das Gamma direkt mit
-        success_space = clip.SetClipProperty("Input Color Space", "Panasonic V-Gamut")
         
-        if success_space:
-            print(f"  -> [Erfolg LUMIX] {clip_name} -> 'Panasonic V-Gamut/V-Log' zugewiesen.")
-            return True
-        else:
-            print(f"  -> [FEHLER] Konnte Farbmanagement für {clip_name} nicht setzen.")
-            return False
+    camera_type_upper = camera_type.upper()
+    mappings = CONFIG.get("camera_mappings", [])
+    
+    # Durchsuche die Mappings aus der JSON
+    for mapping in mappings:
+        # Extrahiere die Suchbegriffe aus der JSON und setze sie auf Großbuchstaben
+        keywords = [kw.upper() for kw in mapping.get("search_keywords", [])]
+        mapping_type = mapping.get("camera_type", "").upper()
+        
+        # MATCH-LOGIK: 
+        # Fall 1: Der Metadaten-Kameratyp (z.B. "S5II") ist direkt in den Such-Keywords enthalten
+        # Fall 2: Der Metadaten-Kameratyp entspricht exakt dem konfigurierten camera_type
+        if camera_type_upper in keywords or camera_type_upper == mapping_type:
+            color_space = mapping.get("input_color_space")
             
+            if not color_space:
+                return False
+                
+            # Wenn der Farbraum auf Standard/Rec.709 bleiben soll, überspringen wir die Zuweisung
+            if "Rec.709" in color_space or "Baseline" in color_space:
+                print(f"  -> [Standard] {clip_name} bleibt auf Standard-Projektfarbraum (Metadaten: '{camera_type}').")
+                return True
+                
+            # Setze den konfigurierten Farbraum in DaVinci Resolve
+            if clip.SetClipProperty("Input Color Space", color_space):
+                print(f"  -> [Erfolg] {clip_name} -> '{color_space}' zugewiesen (Metadaten: '{camera_type}').")
+                
+                # Optionale Absicherung für ältere Lumix-Workflows (schadet nicht, falls es fehlschlägt)
+                if "LUMIX" in mapping_type or "S5" in camera_type_upper:
+                    clip.SetClipProperty("Input Gamma", "Panasonic V-Log")
+                    
+                return True
+            else:
+                print(f"  -> [FEHLER] Resolve API verweigerte '{color_space}' für {clip_name}.")
+                return False
+                
+    print(f"  -> [HINWEIS] Kein Farbraum-Mapping für Kameratyp '{camera_type}' in config.json gefunden.")
     return False
 
 def process_bin(folder):
@@ -42,15 +71,14 @@ def process_bin(folder):
             
         clip_name = clip.GetName()
         
-        # Holt den Kameratyp direkt aus dem Metadatenfeld
+        # Holt den Kameratyp direkt aus dem Metadatenfeld "Camera Type"
         meta_camera_type = clip.GetMetadata("Camera Type")
         
         if meta_camera_type:
-            success = set_color_space_with_fallback(clip, clip_name, meta_camera_type)
-            if not success:
-                print(f"  -> [FEHLER] Unbekannter Kameratyp in Metadaten: '{meta_camera_type}' für {clip_name}")
+            set_color_space_from_config(clip, clip_name, meta_camera_type)
         elif clip.GetClipProperty("Type") != "Timeline":
-            print(f"  -> [HINWEIS] Clip {clip_name} besitzt kein 'Camera Type'-Metadaten-Tag. (Übersprungen)")
+            # Keine Metadaten vorhanden (z.B. Audio/Grafiken)
+            pass
 
     # Rekursiver Durchlauf für alle Unterordner
     sub_folders = folder.GetSubFolderList()
@@ -79,7 +107,7 @@ def automate_color_management_by_bin():
     media_pool = current_project.GetMediaPool()
     root_folder = media_pool.GetRootFolder()
     
-    print("\n--- Starte automatisches Farbmanagement via Metadaten-Auslesung ---")
+    print("\n--- Starte automatisches Farbmanagement via JSON-Konfiguration ---")
     process_bin(root_folder)
     
     # Projekt speichern, um UI-Refresh in Resolve zu erzwingen
