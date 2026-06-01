@@ -2,6 +2,7 @@
     "ALL_MEDIA_DIR": "D:\\Benutzer\\Jochen\\Videos",
     "BASE_TARGET_DIR": "D:\\Benutzer\\Jochen\\Videos\\01-Productions",
     "BASE_PROXY_DIR": "D:\\Benutzer\\Jochen\\Videos\\04-DR-Folders\\ProxyMedia",
+    "BASE_DRX_DIR": "D:\\Benutzer\\Jochen\\Videos\\04-DR-Folders\\LUTs-AND-DRX",
     
     "camera_colors": {
         "LUMIX_S5II": "Orange",
@@ -12,44 +13,58 @@
         "DJI_AVATA360": "Navy",
         "DJI_ACTION2": "Tan",
         "DJI": "Blue",
-        "INSTA": "Purple"
+        "INSTA": "Purple",
+        "REC709": "White"
     },
 
     "camera_mappings": [
         {
             "search_keywords": ["S5II", "S5M2", "GH6"],
             "camera_type": "LUMIX_S5II",
-            "input_color_space": "Panasonic V-Gamut"
+            "input_color_space": "Panasonic V-Gamut",
+            "drx_profile": "FM-STD-Panasonic-VLOG.drx"
         },
         {
             "search_keywords": ["S5D", "S5K"],
             "camera_type": "LUMIX_S5D",
-            "input_color_space": "Panasonic V-Gamut"
+            "input_color_space": "Panasonic V-Gamut",
+            "drx_profile": "FM-STD-Panasonic-VLOG.drx"
         },
         {
             "search_keywords": ["MINI", "MINI4", "MINI3", "M4P"],
             "camera_type": "DJI_MINI",
-            "input_color_space": "DJI D-Gamut"
+            "input_color_space": "DJI D-Gamut",
+            "drx_profile": "FM-STD-DJI-DLOG-M.drx"
         },
         {
             "search_keywords": ["AVATA2"],
             "camera_type": "DJI_AVATA2",
-            "input_color_space": "DJI D-Gamut"
+            "input_color_space": "DJI D-Gamut",
+            "drx_profile": "FM-STD-DJI-DLOG-M.drx"
         },
         {
             "search_keywords": ["ACTION2", "ACT2"],
             "camera_type": "DJI_ACTION2",
-            "input_color_space": "DJI D-Gamut"
+            "input_color_space": "DJI D-Gamut",
+            "drx_profile": "FM-STD-DJI-DLOG-M.drx"
         },
         {
-            "search_keywords": ["POCKET3", "OSMO3"],
+            "search_keywords": ["AVATA"],
             "camera_type": "DJI",
-            "input_color_space": "DJI D-Gamut"
+            "input_color_space": "DJI D-Gamut",
+            "drx_profile": "FM-STD-DJI-DLOG-M.drx"
         },
         {
-            "search_keywords": ["X4", "X3", "X2", "ONE_R"],
+            "search_keywords": ["X4", "X3", "ONE", "GO"],
             "camera_type": "INSTA",
-            "input_color_space": "Project Baseline / Rec.709"
+            "input_color_space": "Rec.709",
+            "drx_profile": "FM-STD-GENERIC-REC709.drx"
+        },
+        {
+            "search_keywords": ["REC709", "GENERIC", "UNKNOWN"],
+            "camera_type": "REC709",
+            "input_color_space": "Rec.709",
+            "drx_profile": "FM-STD-GENERIC-REC709.drx"
         }
     ]
 }

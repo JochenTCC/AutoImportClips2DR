@@ -85,7 +85,7 @@ class ResolveIngestGUI:
         self.frame_row2 = tk.Frame(self.frame_options, bg=self.bg_color)
         self.frame_row2.pack(fill=tk.X, padx=5, pady=2)
         
-        self.var_create_pancakes = tk.BooleanVar(value=False) # Default: Nein
+        self.var_create_pancakes = tk.BooleanVar(value=True)
         self.chk_pancakes = ttk.Checkbutton(
             self.frame_row2, 
             text="Clips automatisch in Kamera-Pancake-Timelines einfügen", 
@@ -94,11 +94,10 @@ class ResolveIngestGUI:
         )
         self.chk_pancakes.pack(side=tk.LEFT, padx=5, pady=2)
         
-        # Zeile 3: Option für automatisches Farbmanagement
         self.frame_row3 = tk.Frame(self.frame_options, bg=self.bg_color)
         self.frame_row3.pack(fill=tk.X, padx=5, pady=2)
         
-        self.var_auto_col = tk.BooleanVar(value=True) # Default: Ja (Aktiviert)
+        self.var_auto_col = tk.BooleanVar(value=False)
         self.chk_auto_col = ttk.Checkbutton(
             self.frame_row3, 
             text="Nach Import automatisch Input Color Space zuweisen (main_ColMgmt)", 
@@ -106,7 +105,7 @@ class ResolveIngestGUI:
             style="Dark.TCheckbutton"
         )
         self.chk_auto_col.pack(side=tk.LEFT, padx=5, pady=2)
-        
+                
         # --- Bereich: Proxy-Einstellungen ---
         self.frame_proxy_settings = tk.LabelFrame(root, text=" Proxy-Videoeinstellungen (NVIDIA NVENC beschleunigt) ", 
                                                  font=("Helvetica", 9, "bold"), bg=self.bg_color, fg="#5CACEE", bd=1)
@@ -194,28 +193,32 @@ class ResolveIngestGUI:
             self.lbl_project.config(text="Verbindung zu DaVinci Resolve nicht möglich.", fg="#FF3030")
 
     def start_sync_thread(self):
-        self.btn_sync.config(state=tk.DISABLED)
-        self.combo_format.config(state=tk.DISABLED)
-        self.chk_pancakes.config(state=tk.DISABLED)
-        self.chk_auto_col.config(state=tk.DISABLED)
-        self.combo_codec.config(state=tk.DISABLED)
-        self.log_area.delete(1.0, tk.END)
-        
-        selected_display_name = self.combo_format.get()
-        format_mode = self.formats[selected_display_name]
-        use_h265 = "H.265" in self.combo_codec.get()
-        create_pancakes = self.var_create_pancakes.get()
-        
-        camera_colors = config.get("camera_colors", {})
+            self.btn_sync.config(state=tk.DISABLED)
+            self.combo_format.config(state=tk.DISABLED)
+            self.chk_pancakes.config(state=tk.DISABLED)
+            self.chk_auto_col.config(state=tk.DISABLED)
+            self.combo_codec.config(state=tk.DISABLED)
+            self.log_area.delete(1.0, tk.END)
+            
+            selected_display_name = self.combo_format.get()
+            format_mode = self.formats[selected_display_name]
+            use_h265 = "H.265" in self.combo_codec.get()
+            create_pancakes = self.var_create_pancakes.get()
+            
+            # KORREKTUR: Daten aus der config für den Worker bereitstellen
+            camera_colors = config.get("camera_colors", {})
+            camera_mappings = config.get("camera_mappings", [])
+            base_drx_dir = config.get("BASE_DRX_DIR", r"D:\Benutzer\Jochen\Videos")
 
-        threading.Thread(
-            target=run_ingest_process, 
-            args=(format_mode, use_h265, self.log, create_pancakes, camera_colors),  
-            daemon=True
-        ).start()
-        
-        self.root.after(500, self.monitor_thread)
-
+            # KORREKTUR: Alle 7 Parameter im Tuple übergeben
+            threading.Thread(
+                target=run_ingest_process, 
+                args=(format_mode, use_h265, self.log, create_pancakes, camera_colors, base_drx_dir, camera_mappings),  
+                daemon=True
+            ).start()
+            
+            self.root.after(500, self.monitor_thread)
+            
     def monitor_thread(self):
         log_content = self.log_area.get("1.0", tk.END)
         if "[FERTIG]" in log_content or "[FEHLER]" in log_content or "UNERWARTETER FEHLER" in log_content:
@@ -244,3 +247,4 @@ class ResolveIngestGUI:
                 self.chk_auto_col.config(state=tk.NORMAL)
         except Exception:
             pass
+            

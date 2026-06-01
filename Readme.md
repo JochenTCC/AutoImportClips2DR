@@ -76,3 +76,4 @@ JSON{
 
 ### Offene ToDos
 * Automatisches Setzen des "Input Gamma", sobald das mit der API geht.
+* Weitere Variante, das ColorGrading zu automatisieren: Es gibt einen Standard-Node-Tree mit den passenden CSTs und allen anderen möglichen Adjustments. Für jede Kamera ist dieser Node-Tree vorhanden. Die Zuweisung erfolgt automatisch mit dem Script. Dadurch sind alle kameraspezifischen Settings schon da und der Rest wird individuell aktiviert / angepasst. Auf die Verwendung von Grouped Clips wird in dem Fall verzichtet. Es muss geprüft werden ob diese Node-Trees automatisiert zugewiesen werden können.
