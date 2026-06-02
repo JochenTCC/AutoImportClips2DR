@@ -18,11 +18,6 @@ def load_config():
 # Laden der Konfiguration
 config = load_config()
 
-# Zuweisung (mit Fallback-Werten, falls etwas in der JSON fehlt)
-ALL_MEDIA_DIR = config.get("ALL_MEDIA_DIR", r"D:\Benutzer\Jochen\Videos")
-BASE_TARGET_DIR = config.get("BASE_TARGET_DIR", r"D:\Benutzer\Jochen\Videos\01-Productions")
-BASE_PROXY_DIR = config.get("BASE_PROXY_DIR", r"D:\Benutzer\Jochen\Videos\04-DR-Folders\ProxyMedia")
-
 # Importe aus dem Unterordner
 from _ingest_modules.config import BASE_TARGET_DIR, WEEKDAYS_DE, VALID_EXTENSIONS
 from _ingest_modules.ingest_worker import run_ingest_process
