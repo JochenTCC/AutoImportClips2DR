@@ -4,7 +4,7 @@ import os
 # Dieses Script muss in den Pfad von Davinci Resolve, also z.B.:
 # C:\ProgramData\Blackmagic Design\DaVinci Resolve\Fusion\Scripts\Edit
 
-ScriptPath = r"C:\Users\joche\Documents\GitHub\AutoImportClips2DR\Scripts"
+ScriptPath = r"C:\Users\joche\Videos\Shared\Scripting\AutoImportClips2DR\Scripts"
 
 try:
     sys.path.append(ScriptPath)
