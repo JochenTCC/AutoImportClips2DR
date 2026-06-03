@@ -62,9 +62,13 @@ AutoImportClips2DR/
 
 ### 1. Installation im Resolve-Skriptordner
 
-Damit das Skript direkt aus Resolve heraus gestartet werden kann, platziere den gesamten Projektordner oder eine Verknüpfung der `Start_Ingest.py` im DaVinci Resolve Skriptverzeichnis:
+Damit das Skript direkt aus Resolve heraus gestartet werden kann, platziere eine Kopie von `Start_Ingest.py` im DaVinci Resolve Skriptverzeichnis:
 
-* **Windows**: `C:\Users\<Dein_User>\AppData\Roaming\Blackmagic Design\DaVinci Resolve\Support\Developer\Scripting\WorkflowIntegration\`
+* **Windows**: `C:\ProgramData\Blackmagic Design\DaVinci Resolve\Fusion\Scripts\Comp`
+
+In dem Script muss der "ScriptPath" noch so gesetzt werden, dass alle Dateien von AutoImportClips2DR gefunden werden können, also z.B.
+
+* **Windows**: `[Dein Pfad zu AutoImportClips2DR]\AutoImportClips2DR\Scripts`
 
 ### 2. Konfiguration der Pfade & Kameras (`config.json`)
 
