@@ -4,7 +4,10 @@ import os
 # Dieses Script muss in den Pfad von Davinci Resolve, also z.B.:
 # C:\ProgramData\Blackmagic Design\DaVinci Resolve\Fusion\Scripts\Edit
 
-ScriptPath = r"C:\Users\joche\Documents\GitHub\AutoImportClips2DR\Scripts"
+ScriptPath = os.getenv("AUTOIMPORTCLIPS2DR_SCRIPT_PATH")
+if not ScriptPath:
+    raise EnvironmentError("Die Umgebungsvariable 'AUTOIMPORTCLIPS2DR_SCRIPT_PATH' ist nicht gesetzt. Bitte setze sie auf den Pfad, in dem sich deine Skripte befinden.")
+ScriptPath = os.path.abspath(os.path.expanduser(ScriptPath))  # Normalisiert den Pfad für das aktuelle Betriebssystem
 
 try:
     sys.path.append(ScriptPath)
