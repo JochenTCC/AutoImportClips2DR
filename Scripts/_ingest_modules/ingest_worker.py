@@ -44,7 +44,6 @@ def process_single_sd_card(label, source_drive, format_mode, project_start_date,
                 camera_type = key.upper()
                 break
         else:
-            # FALLBACK: Wenn gar nichts matcht, weise den generischen Typ zu
             camera_type = "REC709"
             
     cam_base_target_dir = os.path.join(footage_dir, label)
@@ -72,10 +71,20 @@ def process_single_sd_card(label, source_drive, format_mode, project_start_date,
             day_proxy_dir = os.path.join(cam_base_proxy_dir, sub_folder_name)
             os.makedirs(day_target_dir, exist_ok=True)
             
-            log_callback(f"   -> Kopiere Clips nach: Footage/{label}/{sub_folder_name}")
+            log_callback(f"   -> Kopiere Clips strukturiert nach Datum ({sub_folder_name}):")
+            
             for file_path in date_groups[day_str]:
                 file_name = os.path.basename(file_path)
-                copy_files_via_robocopy(os.path.dirname(file_path), day_target_dir, file_name)
+                source_folder = os.path.dirname(file_path)
+                
+                # Ermittlung der kompletten, absoluten Pfade vom Laufwerk weg
+                abs_source = os.path.abspath(os.path.join(source_folder, file_name))
+                abs_target = os.path.abspath(os.path.join(day_target_dir, file_name))
+                
+                log_callback(f"      [COPY] Von: {abs_source}")
+                log_callback(f"             Nach: {abs_target}")
+                
+                copy_files_via_robocopy(source_folder, day_target_dir, file_name)
             
             day_bin = get_or_create_bin(media_pool, cam_bin, sub_folder_name)
             pancake_timeline = None
@@ -147,12 +156,21 @@ def process_single_sd_card(label, source_drive, format_mode, project_start_date,
                         else:
                             log_callback("   -> Keine neuen Clips zum Hinzufügen (bereits in Timeline vorhanden).")
     else:
-        log_callback(f"   -> Kopiere Clips flach nach: Footage/{label}")
+        log_callback(f"   -> Kopiere Clips flach in Hauptordner:")
         flattened_files = get_media_files_flattened(source_drive)
         
         for file_path in flattened_files:
             file_name = os.path.basename(file_path)
-            copy_files_via_robocopy(os.path.dirname(file_path), cam_base_target_dir, file_name)
+            source_folder = os.path.dirname(file_path)
+            
+            # Ermittlung der kompletten, absoluten Pfade vom Laufwerk weg
+            abs_source = os.path.abspath(os.path.join(source_folder, file_name))
+            abs_target = os.path.abspath(os.path.join(cam_base_target_dir, file_name))
+            
+            log_callback(f"      [COPY] Von: {abs_source}")
+            log_callback(f"             Nach: {abs_target}")
+            
+            copy_files_via_robocopy(source_folder, cam_base_target_dir, file_name)
         
         media_pool.SetCurrentFolder(cam_bin)
         clips_on_disk = get_media_files_from_dir(cam_base_target_dir)
@@ -223,10 +241,15 @@ def process_single_sd_card(label, source_drive, format_mode, project_start_date,
                         log_callback("   -> Keine neuen Clips zum Hinzufügen (bereits in Timeline vorhanden).")
 
 
-def run_ingest_process(format_mode, use_h265, log_callback, create_pancakes, camera_colors=None, base_drx_dir="", camera_mappings=None):
+def run_ingest_process(format_mode, use_h265, log_callback, create_pancakes, camera_colors=None, base_drx_dir="", camera_mappings=None, base_target_dir="", base_proxy_dir=""):
     """Haupt-Einstiegspunkt für den Ingest-Prozess (Orchestrator)."""
     if camera_colors is None: camera_colors = {}
     if camera_mappings is None: camera_mappings = []
+
+    # In ingest_worker.py -> run_ingest_process am Anfang einfügen:
+    if not base_target_dir or not base_proxy_dir:
+        log_callback("[FEHLER] Kritischer Programmfehler: Ziel- oder Proxy-Basispfad ist leer!")
+        return
        
     try:
         import DaVinciResolveScript as dvr_script
@@ -244,7 +267,7 @@ def run_ingest_process(format_mode, use_h265, log_callback, create_pancakes, cam
         project_name = current_project.GetName()
         project_start_date = extract_start_date_from_name(project_name)
         
-        project_dir, footage_dir, project_proxy_dir = create_physical_directories(project_name)
+        project_dir, footage_dir, project_proxy_dir = create_physical_directories(project_name, base_target_dir, base_proxy_dir)
         
         media_pool = current_project.GetMediaPool()
         root_folder = media_pool.GetRootFolder()
@@ -271,12 +294,10 @@ def run_ingest_process(format_mode, use_h265, log_callback, create_pancakes, cam
             )
         
         if raw_queue:
-            # Module: proxy_generator
             render_and_link_proxies(raw_queue, use_h265, log_callback)
         
             log_callback("\n[FERTIG] Synchronisation, Metadaten-Tagging und Proxy-Verknüpfungen beendet!")
             
-            # AUTOMATISCHER SEITENWECHSEL: Schaltet Resolve sauber auf die Edit-Page um
             try:
                 if resolve.OpenPage("edit"):
                     log_callback("[GUI] Erfolgreich auf die Edit-Page gewechselt.")

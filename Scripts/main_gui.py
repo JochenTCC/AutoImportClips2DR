@@ -7,25 +7,17 @@ import tkinter as tk
 from tkinter import scrolledtext
 from tkinter import ttk
 
-def load_config():
-    # Sucht die config.json im selben Verzeichnis wie das Skript
-    config_path = os.path.join(os.path.dirname(__file__), 'config.json')
-    if os.path.exists(config_path):
-        with open(config_path, 'r') as f:
-            return json.load(f)
-    return {}
-
-# Laden der Konfiguration
-config = load_config()
-
-# Importe aus dem Unterordner
-from _ingest_modules.config import BASE_TARGET_DIR, WEEKDAYS_DE, VALID_EXTENSIONS
+# Importe aus dem Unterordner (Pfade entfernt, da sie nun aus config.json kommen)
+from _ingest_modules.config import WEEKDAYS_DE, VALID_EXTENSIONS
 from _ingest_modules.ingest_worker import run_ingest_process
 from main_ColMgmt import automate_color_management_by_bin # Neu importiert für die Automatisierung
 
 class ResolveIngestGUI:
-    def __init__(self, root):
+    def __init__(self, root, config=None):
         self.root = root
+        # Falls keine Config übergeben wurde, leeres Dict nutzen
+        self.config = config if config is not None else {}
+        
         self.root.title("Resolve Ingest Automation (Modular)")
         self.root.geometry("750x720")  # Höhe angepasst für beide Optionen
         self.root.minsize(650, 600)
@@ -131,7 +123,9 @@ class ResolveIngestGUI:
         self.log_area.see(tk.END)
 
     def detect_existing_format(self, project_name):
-        project_dir = os.path.join(BASE_TARGET_DIR, project_name)
+        # Dynamisches Auslesen des Produktionspfads aus der übergebenen Konfig
+        base_target_dir = self.config.get("BASE_TARGET_DIR", "")
+        project_dir = os.path.join(base_target_dir, project_name)
         footage_dir = os.path.join(project_dir, "Footage")
         if not os.path.exists(footage_dir):
             return None
@@ -200,15 +194,26 @@ class ResolveIngestGUI:
             use_h265 = "H.265" in self.combo_codec.get()
             create_pancakes = self.var_create_pancakes.get()
             
-            # KORREKTUR: Daten aus der config für den Worker bereitstellen
-            camera_colors = config.get("camera_colors", {})
-            camera_mappings = config.get("camera_mappings", [])
-            base_drx_dir = config.get("BASE_DRX_DIR", r"D:\Benutzer\Jochen\Videos")
+            # Sicherstellen, dass alle Werte sauber aus der validierten Config gezogen werden
+            camera_colors = self.config.get("camera_colors", {})
+            camera_mappings = self.config.get("camera_mappings", [])
+            base_drx_dir = self.config.get("BASE_DRX_DIR", "")
+            
+            # HIER DIE ENTSCHEIDENDEN PFADE AUSLESEN:
+            base_target_dir = self.config.get("BASE_TARGET_DIR", "")
+            base_proxy_dir = self.config.get("BASE_PROXY_DIR", "")
 
-            # KORREKTUR: Alle 7 Parameter im Tuple übergeben
+            # Nutzung von kwargs für maximale Sicherheit gegen Verschiebungen
             threading.Thread(
                 target=run_ingest_process, 
-                args=(format_mode, use_h265, self.log, create_pancakes, camera_colors, base_drx_dir, camera_mappings),  
+                args=(format_mode, use_h265, self.log, create_pancakes),  # Pflichtparameter
+                kwargs={                                                  # Optionale Parameter explizit benannt
+                    "camera_colors": camera_colors,
+                    "base_drx_dir": base_drx_dir,
+                    "camera_mappings": camera_mappings,
+                    "base_target_dir": base_target_dir,
+                    "base_proxy_dir": base_proxy_dir
+                },
                 daemon=True
             ).start()
             
@@ -242,4 +247,3 @@ class ResolveIngestGUI:
                 self.chk_auto_col.config(state=tk.NORMAL)
         except Exception:
             pass
-            
