@@ -12,7 +12,7 @@ from .resolve_media import (
     get_or_create_bin, create_resolve_bins, get_clip_color_by_label,
     tag_media_pool_items, apply_drx_grading_to_timeline
 )
-from .proxy_generator import render_and_link_proxies
+from .proxy_generator import render_and_link_proxies_ffmpeg, render_and_link_proxies_DR_Engine
 
 
 def process_single_sd_card(label, source_drive, format_mode, project_start_date, 
@@ -77,7 +77,6 @@ def process_single_sd_card(label, source_drive, format_mode, project_start_date,
                 file_name = os.path.basename(file_path)
                 source_folder = os.path.dirname(file_path)
                 
-                # Ermittlung der kompletten, absoluten Pfade vom Laufwerk weg
                 abs_source = os.path.abspath(os.path.join(source_folder, file_name))
                 abs_target = os.path.abspath(os.path.join(day_target_dir, file_name))
                 
@@ -88,7 +87,6 @@ def process_single_sd_card(label, source_drive, format_mode, project_start_date,
             
             day_bin = get_or_create_bin(media_pool, cam_bin, sub_folder_name)
             pancake_timeline = None
-            clips_to_append_later = []
             
             if create_pancakes:
                 day_pancake_bin = get_or_create_bin(media_pool, pancakes_bin, sub_folder_name)
@@ -103,103 +101,19 @@ def process_single_sd_card(label, source_drive, format_mode, project_start_date,
             
             media_pool.SetCurrentFolder(day_bin)
             
+            # --- DOPPELTEN IMPORT IM BIN VERHINDERN ---
+            existing_bin_clips = day_bin.GetClipList()
+            existing_bin_filenames = {c.GetName() for c in existing_bin_clips if c}
+            
             clips_on_disk = get_media_files_from_dir(day_target_dir)
-            if clips_on_disk:
-                new_clips = media_pool.ImportMedia(clips_on_disk)
-                if new_clips:
-                    clip_list = new_clips if isinstance(new_clips, list) else [new_clips]
-                    valid_clips_to_add = []
-                    
-                    for clip in clip_list:
-                        if not clip: continue
-                        try:
-                            clip.SetClipProperty("Clip Color", clip_color)
-                        except Exception as color_err:
-                            log_callback(f"       [HINWEIS] Farbe konnte nicht zugewiesen werden: {color_err}")
-                        
-                        clip_name = clip.GetName()
-                        if clip_name.lower().endswith(PROXY_ELIGIBLE_EXTENSIONS):
-                            clip_path_on_disk = os.path.join(day_target_dir, clip_name)
-                            raw_queue.append((clip, clip_path_on_disk, day_proxy_dir))
-                        
-                        valid_clips_to_add.append(clip)
-                    
-                    tag_media_pool_items(valid_clips_to_add, group_keyword, log_callback)
-                    
-                    if create_pancakes and valid_clips_to_add:
-                        try:
-                            valid_clips_to_add.sort(key=lambda c: c.GetClipProperty("Start TC"))
-                        except Exception as sort_err:
-                            log_callback(f"       [HINWEIS] Chronologische Sortierung nach TC fehlgeschlagen: {sort_err}")
-                        
-                        if not pancake_timeline:
-                            media_pool.SetCurrentFolder(day_pancake_bin)
-                            first_clip = valid_clips_to_add[0]
-                            log_callback(f"   -> Erstelle Kamera-Pancake aus Erstclip (erhält Audio-Kanäle): {timeline_name}")
-                            pancake_timeline = media_pool.CreateTimelineFromClips(timeline_name, [first_clip])
-                            clips_to_append_later = valid_clips_to_add[1:]
-                        else:
-                            log_callback(f"   -> Pancake-Timeline existiert bereits: {timeline_name} (wird erweitert)")
-                            clips_to_append_later = valid_clips_to_add
-                        
-                        if pancake_timeline and clips_to_append_later:
-                            current_project.SetCurrentTimeline(pancake_timeline)
-                            
-                            # ABSICHERUNG HIER: Try-Catch fängt Resolve-API-Crashes beim Spur-Auslesen ab
-                            existing_clip_names = set()
-                            try:
-                                raw_items = pancake_timeline.GetItemListInTrack("video", 1)
-                                existing_timeline_items = raw_items if raw_items is not None else []
-                                for item in existing_timeline_items:
-                                    mp_item = item.GetMediaPoolItem()
-                                    if mp_item:
-                                        existing_clip_names.add(mp_item.GetName())
-                            except Exception as api_crash_err:
-                                log_callback(f"       [API HINWEIS] Track-Inhalt konnte nicht direkt ausgelesen werden (wird als leer behandelt).")
-                            
-                            clips_to_append = [c for c in clips_to_append_later if c.GetName() not in existing_clip_names]
-                            
-                            if clips_to_append:
-                                log_callback(f"   -> Füge {len(clips_to_append)} weitere(n) Clip(s) der Timeline hinzu...")
-                                media_pool.AppendToTimeline(clips_to_append)
-                                apply_drx_grading_to_timeline(pancake_timeline, base_drx_dir, camera_type, camera_mappings, log_callback)
-                            else:
-                                log_callback("   -> Keine weiteren Clips zum Hinzufügen (bereits in Timeline vorhanden).")
-    else:
-        log_callback(f"   -> Kopiere Clips flach in Hauptordner:")
-        flattened_files = get_media_files_flattened(source_drive)
-        
-        for file_path in flattened_files:
-            file_name = os.path.basename(file_path)
-            source_folder = os.path.dirname(file_path)
+            # Nur Clips importieren, die noch NICHT im Resolve Bin liegen
+            clips_to_import = [path for path in clips_on_disk if os.path.basename(path) not in existing_bin_filenames]
             
-            # Ermittlung der kompletten, absoluten Pfade vom Laufwerk weg
-            abs_source = os.path.abspath(os.path.join(source_folder, file_name))
-            abs_target = os.path.abspath(os.path.join(cam_base_target_dir, file_name))
-            
-            log_callback(f"      [COPY] Von: {abs_source}")
-            log_callback(f"             Nach: {abs_target}")
-            
-            copy_files_via_robocopy(source_folder, cam_base_target_dir, file_name)
-        
-        media_pool.SetCurrentFolder(cam_bin)
-        clips_on_disk = get_media_files_from_dir(cam_base_target_dir)
-        pancake_timeline = None
-        clips_to_append_later = []
-        
-        if create_pancakes:
-            media_pool.SetCurrentFolder(pancakes_bin)
-            timeline_name = f"PC_FLAT_{camera_type}"
-            existing_items = pancakes_bin.GetClipList()
-            for item in existing_items:
-                if item.GetClipProperty("Type") == "Timeline" and item.GetName() == timeline_name:
-                    pancake_timeline = item
-                    break
-            
-        media_pool.SetCurrentFolder(cam_bin)
-        
-        if clips_on_disk:
-            new_clips = media_pool.ImportMedia(clips_on_disk)
+            if not clips_to_import:
+                log_callback(f"   -> [INFO] Keine neuen Medien zum Importieren für {sub_folder_name} gefunden.")
+                continue
+                
+            new_clips = media_pool.ImportMedia(clips_to_import)
             if new_clips:
                 clip_list = new_clips if isinstance(new_clips, list) else [new_clips]
                 valid_clips_to_add = []
@@ -210,12 +124,12 @@ def process_single_sd_card(label, source_drive, format_mode, project_start_date,
                         clip.SetClipProperty("Clip Color", clip_color)
                     except Exception as color_err:
                         log_callback(f"       [HINWEIS] Farbe konnte nicht zugewiesen werden: {color_err}")
-                        
+                    
                     clip_name = clip.GetName()
                     if clip_name.lower().endswith(PROXY_ELIGIBLE_EXTENSIONS):
-                        clip_path_on_disk = os.path.join(cam_base_target_dir, clip_name)
-                        raw_queue.append((clip, clip_path_on_disk, cam_base_proxy_dir))
-                        
+                        clip_path_on_disk = os.path.join(day_target_dir, clip_name)
+                        raw_queue.append((clip, clip_path_on_disk, day_proxy_dir))
+                    
                     valid_clips_to_add.append(clip)
                 
                 tag_media_pool_items(valid_clips_to_add, group_keyword, log_callback)
@@ -225,22 +139,10 @@ def process_single_sd_card(label, source_drive, format_mode, project_start_date,
                         valid_clips_to_add.sort(key=lambda c: c.GetClipProperty("Start TC"))
                     except Exception as sort_err:
                         log_callback(f"       [HINWEIS] Chronologische Sortierung nach TC fehlgeschlagen: {sort_err}")
-                        
-                    if not pancake_timeline:
-                        media_pool.SetCurrentFolder(pancakes_bin)
-                        first_clip = valid_clips_to_add[0]
-                        log_callback(f"   -> Erstelle Kamera-Pancake aus Erstclip (erhält Audio-Kanäle): {timeline_name}")
-                        pancake_timeline = media_pool.CreateTimelineFromClips(timeline_name, [first_clip])
-                        clips_to_append_later = valid_clips_to_add[1:]
-                    else:
-                        log_callback(f"   -> Pancake-Timeline existiert bereits: {timeline_name} (wird erweitert)")
-                        clips_to_append_later = valid_clips_to_add
                     
-                    if pancake_timeline and clips_to_append_later:
-                        current_project.SetCurrentTimeline(pancake_timeline)
-                        
-                        # ABSICHERUNG HIER: Try-Catch fängt Resolve-API-Crashes für den flachen Modus ab
-                        existing_clip_names = set()
+                    # Schutz: Clips auslesen, die real in der Timeline liegen
+                    existing_clip_names = set()
+                    if pancake_timeline is not None:
                         try:
                             raw_items = pancake_timeline.GetItemListInTrack("video", 1)
                             existing_timeline_items = raw_items if raw_items is not None else []
@@ -249,16 +151,134 @@ def process_single_sd_card(label, source_drive, format_mode, project_start_date,
                                 if mp_item:
                                     existing_clip_names.add(mp_item.GetName())
                         except Exception as api_crash_err:
-                            log_callback(f"       [API HINWEIS] Track-Inhalt konnte nicht direkt ausgelesen werden (wird als leer behandelt).")
-                        
-                        clips_to_append = [c for c in clips_to_append_later if c.GetName() not in existing_clip_names]
-                        
-                        if clips_to_append:
-                            log_callback(f"   -> Füge {len(clips_to_append)} weitere(n) Clip(s) der Timeline hinzu...")
-                            media_pool.AppendToTimeline(clips_to_append)
-                            apply_drx_grading_to_timeline(pancake_timeline, base_drx_dir, camera_type, camera_mappings, log_callback)
-                        else:
-                            log_callback("   -> Keine neuen Clips zum Hinzufügen (bereits in Timeline vorhanden).")
+                            log_callback(f"       [API HINWEIS] Track-Inhalt konnte nicht gelesen werden.")
+                    
+                    clips_to_append = [c for c in valid_clips_to_add if c.GetName() not in existing_clip_names]
+                    
+                    if not clips_to_append:
+                        log_callback(f"   -> [STOP] Alle importierten Clips bereits in Pancake '{timeline_name}' enthalten.")
+                        continue
+                    
+                    if not pancake_timeline:
+                        media_pool.SetCurrentFolder(day_pancake_bin)
+                        first_clip = clips_to_append[0]
+                        log_callback(f"   -> Erstelle Kamera-Pancake aus Erstclip: {timeline_name}")
+                        pancake_timeline = media_pool.CreateTimelineFromClips(timeline_name, [first_clip])
+                        remaining_clips = clips_to_append[1:]
+                    else:
+                        log_callback(f"   -> Pancake-Timeline existiert bereits: {timeline_name} (wird erweitert)")
+                        remaining_clips = clips_to_append
+                    
+                    if pancake_timeline is not None and remaining_clips:
+                        current_project.SetCurrentTimeline(pancake_timeline)
+                        log_callback(f"   -> Füge {len(remaining_clips)} weitere(n) Clip(s) der Timeline hinzu...")
+                        media_pool.AppendToTimeline(remaining_clips)
+                        apply_drx_grading_to_timeline(pancake_timeline, base_drx_dir, camera_type, camera_mappings, log_callback)
+                    elif pancake_timeline is None:
+                        log_callback(f"       [FEHLER] DaVinci Resolve verweigerte das Erstellen der Timeline '{timeline_name}'.")
+    else:
+        log_callback(f"   -> Kopiere Clips flach in Hauptordner:")
+        flattened_files = get_media_files_flattened(source_drive)
+        
+        for file_path in flattened_files:
+            file_name = os.path.basename(file_path)
+            source_folder = os.path.dirname(file_path)
+            
+            abs_source = os.path.abspath(os.path.join(source_folder, file_name))
+            abs_target = os.path.abspath(os.path.join(cam_base_target_dir, file_name))
+            
+            log_callback(f"      [COPY] Von: {abs_source}")
+            log_callback(f"             Nach: {abs_target}")
+            
+            copy_files_via_robocopy(source_folder, cam_base_target_dir, file_name)
+        
+        media_pool.SetCurrentFolder(cam_bin)
+        pancake_timeline = None
+        timeline_name = f"PC_FLAT_{camera_type}"
+        
+        if create_pancakes:
+            media_pool.SetCurrentFolder(pancakes_bin)
+            existing_items = pancakes_bin.GetClipList()
+            for item in existing_items:
+                if item.GetClipProperty("Type") == "Timeline" and item.GetName() == timeline_name:
+                    pancake_timeline = item
+                    break
+            
+        media_pool.SetCurrentFolder(cam_bin)
+        
+        # --- DOPPELTEN IMPORT IM FLAT-BIN VERHINDERN ---
+        existing_bin_clips = cam_bin.GetClipList()
+        existing_bin_filenames = {c.GetName() for c in existing_bin_clips if c}
+        
+        clips_on_disk = get_media_files_from_dir(cam_base_target_dir)
+        clips_to_import = [path for path in clips_on_disk if os.path.basename(path) not in existing_bin_filenames]
+        
+        if not clips_to_import:
+            log_callback(f"   -> [INFO] Keine neuen Medien zum Importieren für flachen Ordner gefunden.")
+            return  # Bei der letzten Karte ist ein Return okay, korrigiert zu 'continue' falls in Schleife, aber hier steuert es das Ende der Funktion.
+            
+        new_clips = media_pool.ImportMedia(clips_to_import)
+        if new_clips:
+            clip_list = new_clips if isinstance(new_clips, list) else [new_clips]
+            valid_clips_to_add = []
+            
+            for clip in clip_list:
+                if not clip: continue
+                try:
+                    clip.SetClipProperty("Clip Color", clip_color)
+                except Exception as color_err:
+                    log_callback(f"       [HINWEIS] Farbe konnte nicht zugewiesen werden: {color_err}")
+                    
+                clip_name = clip.GetName()
+                if clip_name.lower().endswith(PROXY_ELIGIBLE_EXTENSIONS):
+                    clip_path_on_disk = os.path.join(cam_base_target_dir, clip_name)
+                    raw_queue.append((clip, clip_path_on_disk, cam_base_proxy_dir))
+                    
+                valid_clips_to_add.append(clip)
+            
+            tag_media_pool_items(valid_clips_to_add, group_keyword, log_callback)
+            
+            if create_pancakes and valid_clips_to_add:
+                try:
+                    valid_clips_to_add.sort(key=lambda c: c.GetClipProperty("Start TC"))
+                except Exception as sort_err:
+                    log_callback(f"       [HINWEIS] Chronologische Sortierung nach TC fehlgeschlagen: {sort_err}")
+                    
+                existing_clip_names = set()
+                if pancake_timeline is not None:
+                    try:
+                        raw_items = pancake_timeline.GetItemListInTrack("video", 1)
+                        existing_timeline_items = raw_items if raw_items is not None else []
+                        for item in existing_timeline_items:
+                            mp_item = item.GetMediaPoolItem()
+                            if mp_item:
+                                existing_clip_names.add(mp_item.GetName())
+                    except Exception as api_crash_err:
+                        log_callback(f"       [API HINWEIS] Track-Inhalt konnte nicht gelesen werden.")
+                
+                clips_to_append = [c for c in valid_clips_to_add if c.GetName() not in existing_clip_names]
+                
+                if not clips_to_append:
+                    log_callback(f"   -> [STOP] Alle Clips bereits in Pancake '{timeline_name}' enthalten.")
+                    return
+                
+                if not pancake_timeline:
+                    media_pool.SetCurrentFolder(pancakes_bin)
+                    first_clip = clips_to_append[0]
+                    log_callback(f"   -> Erstelle Kamera-Pancake aus Erstclip: {timeline_name}")
+                    pancake_timeline = media_pool.CreateTimelineFromClips(timeline_name, [first_clip])
+                    remaining_clips = clips_to_append[1:]
+                else:
+                    log_callback(f"   -> Pancake-Timeline existiert bereits: {timeline_name} (wird erweitert)")
+                    remaining_clips = clips_to_append
+                
+                if pancake_timeline is not None and remaining_clips:
+                    current_project.SetCurrentTimeline(pancake_timeline)
+                    log_callback(f"   -> Füge {len(remaining_clips)} weitere(n) Clip(s) der Timeline hinzu...")
+                    media_pool.AppendToTimeline(remaining_clips)
+                    apply_drx_grading_to_timeline(pancake_timeline, base_drx_dir, camera_type, camera_mappings, log_callback)
+                elif pancake_timeline is None:
+                    log_callback(f"       [FEHLER] DaVinci Resolve verweigerte das Erstellen der Timeline '{timeline_name}'.")
 
 
 def run_ingest_process(format_mode, use_h265, log_callback, create_pancakes, camera_colors=None, base_drx_dir="", camera_mappings=None, base_target_dir="", base_proxy_dir=""):
@@ -313,7 +333,9 @@ def run_ingest_process(format_mode, use_h265, log_callback, create_pancakes, cam
             )
         
         if raw_queue:
-            render_and_link_proxies(raw_queue, use_h265, log_callback)
+            # Umschalten für Benchmarks (Vergiss nicht, current_project bei DR_Engine mitzugeben)
+            render_and_link_proxies_ffmpeg(raw_queue, use_h265, log_callback)
+            # render_and_link_proxies_DR_Engine(raw_queue, use_h265, log_callback, current_project)
         
             log_callback("\n[FERTIG] Synchronisation, Metadaten-Tagging und Proxy-Verknüpfungen beendet!")
             
