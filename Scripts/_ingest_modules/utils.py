@@ -10,68 +10,96 @@ from .config import VALID_EXTENSIONS, DRIVE_REMOVABLE
 
 def has_media_files(source_dir):
     """Prüft rekursiv, ob die SD-Karte relevante Mediendateien enthält."""
-    for root, _, files in os.walk(source_dir):
-        for file in files:
-            if file.lower().endswith(VALID_EXTENSIONS):
-                return True
+    try:
+        for root, _, files in os.walk(source_dir):
+            for file in files:
+                if file.lower().endswith(VALID_EXTENSIONS):
+                    return True
+    except Exception:
+        pass
     return False
 
 def get_media_files_from_dir(target_dir):
     """Listet alle Mediendateien im Zielordner auf (nur oberste Ebene, um Verschachtelung zu vermeiden)."""
     media_files = []
-    if os.path.exists(target_dir):
-        for file in os.listdir(target_dir):
-            if file.lower().endswith(VALID_EXTENSIONS):
-                media_files.append(os.path.join(target_dir, file))
+    try:
+        if os.path.isdir(target_dir):
+            for file in os.listdir(target_dir):
+                if file.lower().endswith(VALID_EXTENSIONS):
+                    media_files.append(os.path.join(target_dir, file))
+    except Exception:
+        pass
     return media_files
 
 def get_media_files_flattened(source_dir):
     """Sammelt alle Mediendateien einer Karte flach in einer Liste (ignoriert die Quellordner-Struktur)."""
     all_files = []
-    for root, _, files in os.walk(source_dir):
-        for file in files:
-            if file.lower().endswith(VALID_EXTENSIONS):
-                all_files.append(os.path.join(root, file))
+    try:
+        for root, _, files in os.walk(source_dir):
+            for file in files:
+                if file.lower().endswith(VALID_EXTENSIONS):
+                    all_files.append(os.path.join(root, file))
+    except Exception:
+        pass
     return all_files
 
 def get_connected_sd_cards():
-    """Scannt alle Windows-Laufwerke nach Wechselmedien."""
+    """Scannt alle Windows-Laufwerke nach Wechselmedien und fängt tote Laufwerke sicher ab."""
     sd_cards = {}
     kernel32 = ctypes.windll.kernel32
     volumeNameBuffer = ctypes.create_unicode_buffer(1024)
+    breakpoint()
     
     for letter in string.ascii_uppercase:
         drive = f"{letter}:\\"
-        if os.path.exists(drive):
+        try:
+            # ERSETZT os.path.exists: Wir nutzen direkt die Windows-API, um den Typ zu prüfen.
+            # Das wirft keinen WinError 3 bei nicht-existenten oder "toten" Medien.
             drive_type = kernel32.GetDriveTypeW(drive)
+            
             if drive_type == DRIVE_REMOVABLE:
+                # Setze den Error-Mode für Windows kurzzeitig hoch, damit Windows bei leeren 
+                # Kartenlesern kein "Bitte Datenträger einlegen"-Popup wirft.
+                old_mode = kernel32.SetErrorMode(1) # SEM_FAILCRITICALERRORS
+                
                 rc = kernel32.GetVolumeInformationW(
                     drive, volumeNameBuffer, 1024,
                     None, None, None, None, 0
                 )
+                
+                # Error-Mode wieder zurücksetzen
+                kernel32.SetErrorMode(old_mode)
+                
                 if rc and volumeNameBuffer.value.strip():
                     label = volumeNameBuffer.value.strip()
+                    sd_cards[label] = drive
                 else:
-                    label = f"UNKNOWN_DRIVE_{letter}"
-                
-                sd_cards[label] = drive
+                    # Laufwerk ist zwar als Removable markiert, aber es ist keine Karte lesbar eingelegt
+                    continue
+        except Exception:
+            # Fängt alle OS- oder Berechtigungsfehler sicher ab
+            continue
+            
     return sd_cards
 
 def get_media_dates_from_card(source_dir):
     """Scannt die Karte und gruppiert gefundene Dateien nach ihrem Aufnahmetag (YYYY-MM-DD)."""
     date_groups = {}
-    for root, _, files in os.walk(source_dir):
-        for file in files:
-            if file.lower().endswith(VALID_EXTENSIONS):
-                full_path = os.path.join(root, file)
-                try:
-                    mtime = os.path.getmtime(full_path)
-                    date_str = datetime.fromtimestamp(mtime).strftime('%Y-%m-%d')
-                    if date_str not in date_groups:
-                        date_groups[date_str] = []
-                    date_groups[date_str].append(full_path)
-                except Exception:
-                    continue
+    try:
+        for root, _, files in os.walk(source_dir):
+            for file in files:
+                if file.lower().endswith(VALID_EXTENSIONS):
+                    full_path = os.path.join(root, file)
+                    try:
+                        mtime = os.path.getmtime(full_path)
+                        date_str = datetime.fromtimestamp(mtime).strftime('%Y-%m-%d')
+                        if date_str not in date_groups:
+                            date_groups[date_str] = []
+                        date_groups[date_str].append(full_path)
+                    except Exception:
+                        continue
+    except Exception:
+        pass
     return date_groups
 
 def extract_start_date_from_name(project_name):
@@ -83,3 +111,4 @@ def extract_start_date_from_name(project_name):
         except ValueError:
             return None
     return None
+    

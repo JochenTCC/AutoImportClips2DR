@@ -11,7 +11,7 @@ def load_config():
     # Sucht die config.json im selben Verzeichnis wie das Skript
     config_path = os.path.join(os.path.dirname(__file__), 'config.json')
     if os.path.exists(config_path):
-        with open(config_path, 'r') as f:
+        with open(config_path, 'r', encoding='utf-8') as f: # Encoding ergänzt für Umlaute
             return json.load(f)
     return {}
 
@@ -19,7 +19,7 @@ def load_config():
 config = load_config()
 
 # Importe aus dem Unterordner
-from _ingest_modules.config import BASE_TARGET_DIR, WEEKDAYS_DE, VALID_EXTENSIONS
+from _ingest_modules.config import WEEKDAYS_DE, VALID_EXTENSIONS
 from _ingest_modules.ingest_worker import run_ingest_process
 from main_ColMgmt import automate_color_management_by_bin # Neu importiert für die Automatisierung
 
@@ -131,7 +131,12 @@ class ResolveIngestGUI:
         self.log_area.see(tk.END)
 
     def detect_existing_format(self, project_name):
-        project_dir = os.path.join(BASE_TARGET_DIR, project_name)
+        # Nutzt jetzt die config.json statt des leeren BASE_TARGET_DIR Imports aus der config.py
+        target_dir_json = config.get("base_target_dir", config.get("BASE_TARGET_DIR", ""))
+        if not target_dir_json:
+            return None
+            
+        project_dir = os.path.join(target_dir_json, project_name)
         footage_dir = os.path.join(project_dir, "Footage")
         if not os.path.exists(footage_dir):
             return None
@@ -200,15 +205,19 @@ class ResolveIngestGUI:
             use_h265 = "H.265" in self.combo_codec.get()
             create_pancakes = self.var_create_pancakes.get()
             
-            # KORREKTUR: Daten aus der config für den Worker bereitstellen
+            # Daten sauber aus der JSON auslesen (Case-Insensitive Fallback)
             camera_colors = config.get("camera_colors", {})
             camera_mappings = config.get("camera_mappings", [])
-            base_drx_dir = config.get("BASE_DRX_DIR", r"D:\Benutzer\Jochen\Videos")
+            base_drx_dir = config.get("base_drx_dir", config.get("BASE_DRX_DIR", ""))
+            
+            # KORREKTUR: Ermittlung der Hauptverzeichnisse direkt aus der config.json
+            json_target_dir = config.get("base_target_dir", config.get("BASE_TARGET_DIR", ""))
+            json_proxy_dir = config.get("base_proxy_dir", config.get("BASE_PROXY_DIR", ""))
 
-            # KORREKTUR: Alle 7 Parameter im Tuple übergeben
+            # Übergabe um json_target_dir und json_proxy_dir am Ende des Tuples erweitert
             threading.Thread(
                 target=run_ingest_process, 
-                args=(format_mode, use_h265, self.log, create_pancakes, camera_colors, base_drx_dir, camera_mappings),  
+                args=(format_mode, use_h265, self.log, create_pancakes, camera_colors, base_drx_dir, camera_mappings, json_target_dir, json_proxy_dir),  
                 daemon=True
             ).start()
             
@@ -216,7 +225,7 @@ class ResolveIngestGUI:
             
     def monitor_thread(self):
         log_content = self.log_area.get("1.0", tk.END)
-        if "[FERTIG]" in log_content or "[FEHLER]" in log_content or "UNERWARTETER FEHLER" in log_content:
+        if "[FERTIG]" in log_content or "[FEHLER]" in log_content or "UNERWRAPETER FEHLER" in log_content or "UNERWANTED" in log_content or "FEHLER" in log_content:
             # Wenn Ingest beendet und Option aktiv ist, stoße das Farbmanagement an
             if "[FERTIG]" in log_content and self.var_auto_col.get():
                 self.log("\n[AUTOMATISIERUNG] Starte Farbmanagement via Metadaten an...")
@@ -227,19 +236,3 @@ class ResolveIngestGUI:
                     self.log("[HINWEIS] Bitte bis auf Weiteres das \"Input Gamma\" manuell zuweisen!")
                 except Exception as col_err:
                     self.log(f"[AUTOMATISIERUNG FEHLER] Fehler bei Farbraumzuweisung: {col_err}")
-                    
-            self.unlock_gui_safely()
-        else:
-            self.root.after(500, self.monitor_thread)
-
-    def unlock_gui_safely(self):
-        try:
-            self.btn_sync.config(state=tk.NORMAL)
-            self.combo_codec.config(state="readonly")
-            if not self.format_permanently_locked:
-                self.combo_format.config(state="readonly")
-                self.chk_pancakes.config(state=tk.NORMAL)
-                self.chk_auto_col.config(state=tk.NORMAL)
-        except Exception:
-            pass
-            
