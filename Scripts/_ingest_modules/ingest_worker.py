@@ -20,7 +20,7 @@ def process_single_sd_card(label, source_drive, format_mode, project_start_date,
                            pancakes_bin, create_pancakes, log_callback, raw_queue, camera_colors,
                            base_drx_dir, camera_mappings):
     """Verarbeitet eine einzelne SD-Karte mit optionaler Timeline-Generierung."""
-    log_callback(f"\n[GEFUNDEN] Verarbeite Karte '{label}'...")
+    log_callback(f"\n[GEFOUNDEN] Verarbeite Karte '{label}'...")
     
     clip_color = get_clip_color_by_label(label, camera_colors)
     log_callback(f"   -> Zugewiesene Resolve-Clipfarbe: {clip_color}")
@@ -88,8 +88,6 @@ def process_single_sd_card(label, source_drive, format_mode, project_start_date,
             
             day_bin = get_or_create_bin(media_pool, cam_bin, sub_folder_name)
             pancake_timeline = None
-            
-            # Speicher für Clips, die nach dem Erstellen noch angehängt werden müssen
             clips_to_append_later = []
             
             if create_pancakes:
@@ -134,7 +132,6 @@ def process_single_sd_card(label, source_drive, format_mode, project_start_date,
                         except Exception as sort_err:
                             log_callback(f"       [HINWEIS] Chronologische Sortierung nach TC fehlgeschlagen: {sort_err}")
                         
-                        # Dynamische Timeline-Erstellung zur Rettung der Audio-Tracks
                         if not pancake_timeline:
                             media_pool.SetCurrentFolder(day_pancake_bin)
                             first_clip = valid_clips_to_add[0]
@@ -147,14 +144,18 @@ def process_single_sd_card(label, source_drive, format_mode, project_start_date,
                         
                         if pancake_timeline and clips_to_append_later:
                             current_project.SetCurrentTimeline(pancake_timeline)
-                            existing_timeline_items = pancake_timeline.GetItemListInTrack("video", 1)
-                            existing_clip_names = set()
                             
-                            if existing_timeline_items:
+                            # ABSICHERUNG HIER: Try-Catch fängt Resolve-API-Crashes beim Spur-Auslesen ab
+                            existing_clip_names = set()
+                            try:
+                                raw_items = pancake_timeline.GetItemListInTrack("video", 1)
+                                existing_timeline_items = raw_items if raw_items is not None else []
                                 for item in existing_timeline_items:
                                     mp_item = item.GetMediaPoolItem()
                                     if mp_item:
                                         existing_clip_names.add(mp_item.GetName())
+                            except Exception as api_crash_err:
+                                log_callback(f"       [API HINWEIS] Track-Inhalt konnte nicht direkt ausgelesen werden (wird als leer behandelt).")
                             
                             clips_to_append = [c for c in clips_to_append_later if c.GetName() not in existing_clip_names]
                             
@@ -237,14 +238,18 @@ def process_single_sd_card(label, source_drive, format_mode, project_start_date,
                     
                     if pancake_timeline and clips_to_append_later:
                         current_project.SetCurrentTimeline(pancake_timeline)
-                        existing_timeline_items = pancake_timeline.GetItemListInTrack("video", 1)
-                        existing_clip_names = set()
                         
-                        if existing_timeline_items:
+                        # ABSICHERUNG HIER: Try-Catch fängt Resolve-API-Crashes für den flachen Modus ab
+                        existing_clip_names = set()
+                        try:
+                            raw_items = pancake_timeline.GetItemListInTrack("video", 1)
+                            existing_timeline_items = raw_items if raw_items is not None else []
                             for item in existing_timeline_items:
                                 mp_item = item.GetMediaPoolItem()
                                 if mp_item:
                                     existing_clip_names.add(mp_item.GetName())
+                        except Exception as api_crash_err:
+                            log_callback(f"       [API HINWEIS] Track-Inhalt konnte nicht direkt ausgelesen werden (wird als leer behandelt).")
                         
                         clips_to_append = [c for c in clips_to_append_later if c.GetName() not in existing_clip_names]
                         

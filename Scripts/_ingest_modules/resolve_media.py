@@ -75,7 +75,15 @@ def apply_drx_grading_to_timeline(timeline, base_drx_dir, camera_type, camera_ma
         return
 
     try:
-        items = timeline.GetItemListInTrack("video", 1)
+        # FIX HIER: Absicherung gegen API-Crashes und NoneType-Rückgaben bei leerem Track 1
+        items = []
+        try:
+            raw_items = timeline.GetItemListInTrack("video", 1)
+            items = raw_items if raw_items is not None else []
+        except Exception as api_track_err:
+            log_callback(f"       [API HINWEIS] Timeline-Track konnte beim DRX-Zuweisen nicht ausgelesen werden (wird übersprungen).")
+            return
+
         if not items:
             return
 
@@ -109,4 +117,3 @@ def apply_drx_grading_to_timeline(timeline, base_drx_dir, camera_type, camera_ma
             
     except Exception as e:
         log_callback(f"       [HINWEIS] Fehler beim Anwenden des DRX-Gradings: {e}")
-
