@@ -89,6 +89,9 @@ def process_single_sd_card(label, source_drive, format_mode, project_start_date,
             day_bin = get_or_create_bin(media_pool, cam_bin, sub_folder_name)
             pancake_timeline = None
             
+            # Speicher für Clips, die nach dem Erstellen noch angehängt werden müssen
+            clips_to_append_later = []
+            
             if create_pancakes:
                 day_pancake_bin = get_or_create_bin(media_pool, pancakes_bin, sub_folder_name)
                 media_pool.SetCurrentFolder(day_pancake_bin)
@@ -99,12 +102,6 @@ def process_single_sd_card(label, source_drive, format_mode, project_start_date,
                     if item.GetClipProperty("Type") == "Timeline" and item.GetName() == timeline_name:
                         pancake_timeline = item
                         break
-                
-                if not pancake_timeline:
-                    log_callback(f"   -> Erstelle Kamera-Pancake: {timeline_name}")
-                    pancake_timeline = media_pool.CreateEmptyTimeline(timeline_name)
-                else:
-                    log_callback(f"   -> Pancake-Timeline existiert bereits: {timeline_name} (wird erweitert)")
             
             media_pool.SetCurrentFolder(day_bin)
             
@@ -131,30 +128,42 @@ def process_single_sd_card(label, source_drive, format_mode, project_start_date,
                     
                     tag_media_pool_items(valid_clips_to_add, group_keyword, log_callback)
                     
-                    if create_pancakes and pancake_timeline and valid_clips_to_add:
+                    if create_pancakes and valid_clips_to_add:
                         try:
                             valid_clips_to_add.sort(key=lambda c: c.GetClipProperty("Start TC"))
                         except Exception as sort_err:
                             log_callback(f"       [HINWEIS] Chronologische Sortierung nach TC fehlgeschlagen: {sort_err}")
-                            
-                        current_project.SetCurrentTimeline(pancake_timeline)
-                        existing_timeline_items = pancake_timeline.GetItemListInTrack("video", 1)
-                        existing_clip_names = set()
                         
-                        if existing_timeline_items:
-                            for item in existing_timeline_items:
-                                mp_item = item.GetMediaPoolItem()
-                                if mp_item:
-                                    existing_clip_names.add(mp_item.GetName())
-                        
-                        clips_to_append = [c for c in valid_clips_to_add if c.GetName() not in existing_clip_names]
-                        
-                        if clips_to_append:
-                            log_callback(f"   -> Füge {len(clips_to_append)} neue(n) Clip(s) der Timeline hinzu...")
-                            media_pool.AppendToTimeline(clips_to_append)
-                            apply_drx_grading_to_timeline(pancake_timeline, base_drx_dir, camera_type, camera_mappings, log_callback)
+                        # Dynamische Timeline-Erstellung zur Rettung der Audio-Tracks
+                        if not pancake_timeline:
+                            media_pool.SetCurrentFolder(day_pancake_bin)
+                            first_clip = valid_clips_to_add[0]
+                            log_callback(f"   -> Erstelle Kamera-Pancake aus Erstclip (erhält Audio-Kanäle): {timeline_name}")
+                            pancake_timeline = media_pool.CreateTimelineFromClips(timeline_name, [first_clip])
+                            clips_to_append_later = valid_clips_to_add[1:]
                         else:
-                            log_callback("   -> Keine neuen Clips zum Hinzufügen (bereits in Timeline vorhanden).")
+                            log_callback(f"   -> Pancake-Timeline existiert bereits: {timeline_name} (wird erweitert)")
+                            clips_to_append_later = valid_clips_to_add
+                        
+                        if pancake_timeline and clips_to_append_later:
+                            current_project.SetCurrentTimeline(pancake_timeline)
+                            existing_timeline_items = pancake_timeline.GetItemListInTrack("video", 1)
+                            existing_clip_names = set()
+                            
+                            if existing_timeline_items:
+                                for item in existing_timeline_items:
+                                    mp_item = item.GetMediaPoolItem()
+                                    if mp_item:
+                                        existing_clip_names.add(mp_item.GetName())
+                            
+                            clips_to_append = [c for c in clips_to_append_later if c.GetName() not in existing_clip_names]
+                            
+                            if clips_to_append:
+                                log_callback(f"   -> Füge {len(clips_to_append)} weitere(n) Clip(s) der Timeline hinzu...")
+                                media_pool.AppendToTimeline(clips_to_append)
+                                apply_drx_grading_to_timeline(pancake_timeline, base_drx_dir, camera_type, camera_mappings, log_callback)
+                            else:
+                                log_callback("   -> Keine weiteren Clips zum Hinzufügen (bereits in Timeline vorhanden).")
     else:
         log_callback(f"   -> Kopiere Clips flach in Hauptordner:")
         flattened_files = get_media_files_flattened(source_drive)
@@ -175,6 +184,7 @@ def process_single_sd_card(label, source_drive, format_mode, project_start_date,
         media_pool.SetCurrentFolder(cam_bin)
         clips_on_disk = get_media_files_from_dir(cam_base_target_dir)
         pancake_timeline = None
+        clips_to_append_later = []
         
         if create_pancakes:
             media_pool.SetCurrentFolder(pancakes_bin)
@@ -184,12 +194,6 @@ def process_single_sd_card(label, source_drive, format_mode, project_start_date,
                 if item.GetClipProperty("Type") == "Timeline" and item.GetName() == timeline_name:
                     pancake_timeline = item
                     break
-            
-            if not pancake_timeline:
-                log_callback(f"   -> Erstelle Kamera-Pancake: {timeline_name}")
-                pancake_timeline = media_pool.CreateEmptyTimeline(timeline_name)
-            else:
-                log_callback(f"   -> Pancake-Timeline existiert bereits: {timeline_name} (wird erweitert)")
             
         media_pool.SetCurrentFolder(cam_bin)
         
@@ -215,30 +219,41 @@ def process_single_sd_card(label, source_drive, format_mode, project_start_date,
                 
                 tag_media_pool_items(valid_clips_to_add, group_keyword, log_callback)
                 
-                if create_pancakes and pancake_timeline and valid_clips_to_add:
+                if create_pancakes and valid_clips_to_add:
                     try:
                         valid_clips_to_add.sort(key=lambda c: c.GetClipProperty("Start TC"))
                     except Exception as sort_err:
                         log_callback(f"       [HINWEIS] Chronologische Sortierung nach TC fehlgeschlagen: {sort_err}")
                         
-                    current_project.SetCurrentTimeline(pancake_timeline)
-                    existing_timeline_items = pancake_timeline.GetItemListInTrack("video", 1)
-                    existing_clip_names = set()
-                    
-                    if existing_timeline_items:
-                        for item in existing_timeline_items:
-                            mp_item = item.GetMediaPoolItem()
-                            if mp_item:
-                                existing_clip_names.add(mp_item.GetName())
-                    
-                    clips_to_append = [c for c in valid_clips_to_add if c.GetName() not in existing_clip_names]
-                    
-                    if clips_to_append:
-                        log_callback(f"   -> Füge {len(clips_to_append)} neue(n) Clip(s) der Timeline hinzu...")
-                        media_pool.AppendToTimeline(clips_to_append)
-                        apply_drx_grading_to_timeline(pancake_timeline, base_drx_dir, camera_type, camera_mappings, log_callback)
+                    if not pancake_timeline:
+                        media_pool.SetCurrentFolder(pancakes_bin)
+                        first_clip = valid_clips_to_add[0]
+                        log_callback(f"   -> Erstelle Kamera-Pancake aus Erstclip (erhält Audio-Kanäle): {timeline_name}")
+                        pancake_timeline = media_pool.CreateTimelineFromClips(timeline_name, [first_clip])
+                        clips_to_append_later = valid_clips_to_add[1:]
                     else:
-                        log_callback("   -> Keine neuen Clips zum Hinzufügen (bereits in Timeline vorhanden).")
+                        log_callback(f"   -> Pancake-Timeline existiert bereits: {timeline_name} (wird erweitert)")
+                        clips_to_append_later = valid_clips_to_add
+                    
+                    if pancake_timeline and clips_to_append_later:
+                        current_project.SetCurrentTimeline(pancake_timeline)
+                        existing_timeline_items = pancake_timeline.GetItemListInTrack("video", 1)
+                        existing_clip_names = set()
+                        
+                        if existing_timeline_items:
+                            for item in existing_timeline_items:
+                                mp_item = item.GetMediaPoolItem()
+                                if mp_item:
+                                    existing_clip_names.add(mp_item.GetName())
+                        
+                        clips_to_append = [c for c in clips_to_append_later if c.GetName() not in existing_clip_names]
+                        
+                        if clips_to_append:
+                            log_callback(f"   -> Füge {len(clips_to_append)} weitere(n) Clip(s) der Timeline hinzu...")
+                            media_pool.AppendToTimeline(clips_to_append)
+                            apply_drx_grading_to_timeline(pancake_timeline, base_drx_dir, camera_type, camera_mappings, log_callback)
+                        else:
+                            log_callback("   -> Keine neuen Clips zum Hinzufügen (bereits in Timeline vorhanden).")
 
 
 def run_ingest_process(format_mode, use_h265, log_callback, create_pancakes, camera_colors=None, base_drx_dir="", camera_mappings=None, base_target_dir="", base_proxy_dir=""):
@@ -246,7 +261,6 @@ def run_ingest_process(format_mode, use_h265, log_callback, create_pancakes, cam
     if camera_colors is None: camera_colors = {}
     if camera_mappings is None: camera_mappings = []
 
-    # In ingest_worker.py -> run_ingest_process am Anfang einfügen:
     if not base_target_dir or not base_proxy_dir:
         log_callback("[FEHLER] Kritischer Programmfehler: Ziel- oder Proxy-Basispfad ist leer!")
         return

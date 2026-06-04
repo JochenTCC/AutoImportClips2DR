@@ -43,13 +43,18 @@ def render_and_link_proxies(raw_queue, use_h264_or_h265, log_callback):
         
         filter_str = "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2"
         
+        # ÄNDERUNG HIER:
+        # -map 0:v und -map 0:a erzwingen die vollständige Übernahme aller Streams.
+        # -c:a aac encodiert alle Spuren (1-4) exakt im selben Layout neu, was Resolve zur Audio-Verknüpfung zwingend braucht.
         cmd = [
             "ffmpeg", "-y",
             "-hwaccel", "cuda",
-            "-i", source_path
+            "-i", source_path,
+            "-map", "0:v",
+            "-map", "0:a"
         ] + video_codec_args + [
             "-vf", filter_str,
-            "-c:a", "copy",
+            "-c:a", "aac",
             expected_proxy_path
         ]
         
