@@ -19,8 +19,8 @@ def process_single_sd_card(label, source_drive, format_mode, project_start_date,
                            footage_dir, project_proxy_dir, current_project, media_pool, footage_bin, 
                            pancakes_bin, create_pancakes, log_callback, raw_queue, camera_colors,
                            base_drx_dir, camera_mappings):
-    """Verarbeitet eine einzelne SD-Karte mit optionaler Timeline-Generierung."""
-    log_callback(f"\n[GEFOUNDEN] Verarbeite Karte '{label}'...")
+    """Verarbeitet eine SD-Karte oder ein lokales Verzeichnis mit optionaler Timeline-Generierung."""
+    log_callback(f"\n[INFO] Verarbeite Medienquelle/Label '{label}'...")
     
     clip_color = get_clip_color_by_label(label, camera_colors)
     log_callback(f"   -> Zugewiesene Resolve-Clipfarbe: {clip_color}")
@@ -46,15 +46,28 @@ def process_single_sd_card(label, source_drive, format_mode, project_start_date,
         else:
             camera_type = "REC709"
             
-    cam_base_target_dir = os.path.join(footage_dir, label)
-    cam_base_proxy_dir = os.path.join(project_proxy_dir, label)
+    # Falls Medien direkt flach im Root lagen, passen wir die Basispfade an
+    if label == "FOOTAGE_ROOT":
+        cam_base_target_dir = footage_dir
+        cam_base_proxy_dir = project_proxy_dir
+        bin_label = "Footage"
+    else:
+        cam_base_target_dir = os.path.join(footage_dir, label)
+        cam_base_proxy_dir = os.path.join(project_proxy_dir, label)
+        bin_label = label
+        
     os.makedirs(cam_base_target_dir, exist_ok=True)
     
-    cam_bin = get_or_create_bin(media_pool, footage_bin, label)
+    cam_bin = get_or_create_bin(media_pool, footage_bin, bin_label)
     group_keyword = f"{camera_type}"
     
     if format_mode != "NONE":
-        date_groups = get_media_dates_from_card(source_drive)
+        # Lokaler Modus: Wenn kein source_drive existiert, lesen wir die Daten direkt aus dem Zielordner
+        if source_drive:
+            date_groups = get_media_dates_from_card(source_drive)
+        else:
+            date_groups = get_media_dates_from_card(cam_base_target_dir)
+            
         sorted_days = sorted(list(date_groups.keys()))
         
         for day_str in sorted_days:
@@ -71,7 +84,7 @@ def process_single_sd_card(label, source_drive, format_mode, project_start_date,
             day_proxy_dir = os.path.join(cam_base_proxy_dir, sub_folder_name)
             os.makedirs(day_target_dir, exist_ok=True)
             
-            log_callback(f"   -> Kopiere Clips strukturiert nach Datum ({sub_folder_name}):")
+            log_callback(f"   -> Überprüfe Clips für Datum ({sub_folder_name}):")
             
             for file_path in date_groups[day_str]:
                 file_name = os.path.basename(file_path)
@@ -80,10 +93,11 @@ def process_single_sd_card(label, source_drive, format_mode, project_start_date,
                 abs_source = os.path.abspath(os.path.join(source_folder, file_name))
                 abs_target = os.path.abspath(os.path.join(day_target_dir, file_name))
                 
-                log_callback(f"      [COPY] Von: {abs_source}")
-                log_callback(f"             Nach: {abs_target}")
-                
-                copy_files_via_robocopy(source_folder, day_target_dir, file_name)
+                # Robocopy nur ausführen, wenn Quelle und Ziel wirklich unterschiedlich sind
+                if abs_source != abs_target:
+                    log_callback(f"      [COPY] Von: {abs_source}")
+                    log_callback(f"             Nach: {abs_target}")
+                    copy_files_via_robocopy(source_folder, day_target_dir, file_name)
             
             day_bin = get_or_create_bin(media_pool, cam_bin, sub_folder_name)
             pancake_timeline = None
@@ -106,7 +120,6 @@ def process_single_sd_card(label, source_drive, format_mode, project_start_date,
             existing_bin_filenames = {c.GetName() for c in existing_bin_clips if c}
             
             clips_on_disk = get_media_files_from_dir(day_target_dir)
-            # Nur Clips importieren, die noch NICHT im Resolve Bin liegen
             clips_to_import = [path for path in clips_on_disk if os.path.basename(path) not in existing_bin_filenames]
             
             if not clips_to_import:
@@ -140,7 +153,6 @@ def process_single_sd_card(label, source_drive, format_mode, project_start_date,
                     except Exception as sort_err:
                         log_callback(f"       [HINWEIS] Chronologische Sortierung nach TC fehlgeschlagen: {sort_err}")
                     
-                    # Schutz: Clips auslesen, die real in der Timeline liegen
                     existing_clip_names = set()
                     if pancake_timeline is not None:
                         try:
@@ -177,20 +189,24 @@ def process_single_sd_card(label, source_drive, format_mode, project_start_date,
                     elif pancake_timeline is None:
                         log_callback(f"       [FEHLER] DaVinci Resolve verweigerte das Erstellen der Timeline '{timeline_name}'.")
     else:
-        log_callback(f"   -> Kopiere Clips flach in Hauptordner:")
-        flattened_files = get_media_files_flattened(source_drive)
-        
-        for file_path in flattened_files:
-            file_name = os.path.basename(file_path)
-            source_folder = os.path.dirname(file_path)
+        # Flat-Mode (format_mode == "NONE")
+        if source_drive:
+            log_callback(f"   -> Kopiere Clips flach in Hauptordner:")
+            flattened_files = get_media_files_flattened(source_drive)
             
-            abs_source = os.path.abspath(os.path.join(source_folder, file_name))
-            abs_target = os.path.abspath(os.path.join(cam_base_target_dir, file_name))
-            
-            log_callback(f"      [COPY] Von: {abs_source}")
-            log_callback(f"             Nach: {abs_target}")
-            
-            copy_files_via_robocopy(source_folder, cam_base_target_dir, file_name)
+            for file_path in flattened_files:
+                file_name = os.path.basename(file_path)
+                source_folder = os.path.dirname(file_path)
+                
+                abs_source = os.path.abspath(os.path.join(source_folder, file_name))
+                abs_target = os.path.abspath(os.path.join(cam_base_target_dir, file_name))
+                
+                log_callback(f"      [COPY] Von: {abs_source}")
+                log_callback(f"             Nach: {abs_target}")
+                
+                copy_files_via_robocopy(source_folder, cam_base_target_dir, file_name)
+        else:
+            log_callback(f"   -> Lokale Medien vorhanden. Überspringe Kopiervorgang.")
         
         media_pool.SetCurrentFolder(cam_bin)
         pancake_timeline = None
@@ -215,7 +231,7 @@ def process_single_sd_card(label, source_drive, format_mode, project_start_date,
         
         if not clips_to_import:
             log_callback(f"   -> [INFO] Keine neuen Medien zum Importieren für flachen Ordner gefunden.")
-            return  # Bei der letzten Karte ist ein Return okay, korrigiert zu 'continue' falls in Schleife, aber hier steuert es das Ende der Funktion.
+            return  
             
         new_clips = media_pool.ImportMedia(clips_to_import)
         if new_clips:
@@ -252,7 +268,7 @@ def process_single_sd_card(label, source_drive, format_mode, project_start_date,
                         for item in existing_timeline_items:
                             mp_item = item.GetMediaPoolItem()
                             if mp_item:
-                                existing_clip_names.add(mp_item.GetName())
+                                            existing_clip_names.add(mp_item.GetName())
                     except Exception as api_crash_err:
                         log_callback(f"       [API HINWEIS] Track-Inhalt konnte nicht gelesen werden.")
                 
@@ -313,16 +329,34 @@ def run_ingest_process(format_mode, use_h265, log_callback, create_pancakes, cam
         
         footage_bin, pancakes_bin = create_resolve_bins(media_pool, root_folder)
         
+        # Versuche SD-Karten zu erkennen
         detected_sd_cards = get_connected_sd_cards()
+        
+        # --- FALLBACK: LOKALER MODUS (WENN KEINE SD-KARTEN ERKANNT WURDEN) ---
         if not detected_sd_cards:
-            log_callback("\n[HINWEIS] Keine SD-Karten gefunden.")
+            log_callback("\n[HINWEIS] Keine SD-Karten gefunden. Suche nach lokalen Medien im Projektverzeichnis...")
+            if os.path.exists(footage_dir):
+                # 1. Scanne nach Unterordnern (z. B. Kamera-Labels wie CAM_A, GH6, DJI_AVATA)
+                for item in os.listdir(footage_dir):
+                    if os.path.isdir(os.path.join(footage_dir, item)) and item.lower() != "proxies":
+                        detected_sd_cards[item] = None  # None signalisiert: Bereits lokal auf HDD
+                
+                # 2. Falls keine Unterordner existieren, aber Clips direkt flach im Footage-Ordner liegen
+                if not detected_sd_cards:
+                    from .utils import get_media_files_from_dir
+                    if get_media_files_from_dir(footage_dir):
+                        detected_sd_cards["FOOTAGE_ROOT"] = None
+        
+        if not detected_sd_cards:
+            log_callback("[FEHLER] Weder SD-Karten noch lokale Medien im Zielverzeichnis gefunden.")
             return
             
         raw_queue = []
-        log_callback("[SCHRITT 1/2] Kopiere Dateien von SD-Karten und importiere Medien...")
+        log_callback("[SCHRITT 1/2] Analysiere Medienquellen und importiere in DaVinci Resolve...")
         
         for label, source_drive in detected_sd_cards.items():
-            if not has_media_files(source_drive):
+            # Nur bei echten SD-Karten vorab prüfen, ob Medien existieren
+            if source_drive and not has_media_files(source_drive):
                 continue
             
             process_single_sd_card(
@@ -333,7 +367,6 @@ def run_ingest_process(format_mode, use_h265, log_callback, create_pancakes, cam
             )
         
         if raw_queue:
-            # Umschalten für Benchmarks (Vergiss nicht, current_project bei DR_Engine mitzugeben)
             render_and_link_proxies_ffmpeg(raw_queue, use_h265, log_callback)
             # render_and_link_proxies_DR_Engine(raw_queue, use_h265, log_callback, current_project)
         
