@@ -1,2 +1,6 @@
-*.pyc
-__pxcache__/
+Scripts/__pycache__/main_gui.cpython-314.pyc
+Scripts/_ingest_modules/__pycache__/config.cpython-314.pyc
+Scripts/_ingest_modules/__pycache__/drive_ops.cpython-314.pyc
+Scripts/_ingest_modules/__pycache__/ingest_worker.cpython-314.pyc
+Scripts/_ingest_modules/__pycache__/proxy_generator.cpython-314.pyc
+Scripts/_ingest_modules/__pycache__/utils.cpython-314.pyc
