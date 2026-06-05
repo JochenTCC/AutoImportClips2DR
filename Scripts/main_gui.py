@@ -19,8 +19,8 @@ class ResolveIngestGUI:
         self.config = config if config is not None else {}
         
         self.root.title("Resolve Ingest Automation (Modular)")
-        self.root.geometry("750x720")  # Höhe angepasst für beide Optionen
-        self.root.minsize(650, 600)
+        self.root.geometry("750x750")  # Höhe leicht erhöht für die neue Option
+        self.root.minsize(650, 650)
         
         self.bg_color = "#242424"
         self.fg_color = "#E0E0E0"
@@ -81,6 +81,7 @@ class ResolveIngestGUI:
         )
         self.chk_pancakes.pack(side=tk.LEFT, padx=5, pady=2)
         
+        # Zeile 3: Farbmanagement
         self.frame_row3 = tk.Frame(self.frame_options, bg=self.bg_color)
         self.frame_row3.pack(fill=tk.X, padx=5, pady=2)
         
@@ -92,6 +93,19 @@ class ResolveIngestGUI:
             style="Dark.TCheckbutton"
         )
         self.chk_auto_col.pack(side=tk.LEFT, padx=5, pady=2)
+
+        # Zeile 4: NEU - Projekt-Backup-Option
+        self.frame_row4 = tk.Frame(self.frame_options, bg=self.bg_color)
+        self.frame_row4.pack(fill=tk.X, padx=5, pady=2)
+        
+        self.var_backup_project = tk.BooleanVar(value=True)
+        self.chk_backup = ttk.Checkbutton(
+            self.frame_row4,
+            text="Automatisches Projekt-Backup (.drp) vor Ingest erstellen (Empfohlen)",
+            variable=self.var_backup_project,
+            style="Dark.TCheckbutton"
+        )
+        self.chk_backup.pack(side=tk.LEFT, padx=5, pady=2)
                 
         # --- Bereich: Proxy-Einstellungen ---
         self.frame_proxy_settings = tk.LabelFrame(root, text=" Proxy-Videoeinstellungen (NVIDIA NVENC beschleunigt) ", 
@@ -123,7 +137,6 @@ class ResolveIngestGUI:
         self.log_area.see(tk.END)
 
     def detect_existing_format(self, project_name):
-        # Dynamisches Auslesen des Produktionspfads aus der übergebenen Konfig
         base_target_dir = self.config.get("BASE_TARGET_DIR", "")
         project_dir = os.path.join(base_target_dir, project_name)
         footage_dir = os.path.join(project_dir, "Footage")
@@ -170,12 +183,14 @@ class ResolveIngestGUI:
                         self.combo_format.config(state=tk.DISABLED)
                         self.chk_pancakes.config(state=tk.DISABLED)
                         self.chk_auto_col.config(state=tk.DISABLED)
+                        self.chk_backup.config(state=tk.DISABLED)
                         self.frame_options.config(text=" Strukturierung & Automatisierung (Gesperrt: Einstellungen aus bestehendem Ingest aktiv) ", fg="#FFCC00")
                     else:
                         self.format_permanently_locked = False
                         self.combo_format.config(state="readonly")
                         self.chk_pancakes.config(state=tk.NORMAL)
                         self.chk_auto_col.config(state=tk.NORMAL)
+                        self.chk_backup.config(state=tk.NORMAL)
                     return
             self.lbl_project.config(text="Kein geöffnetes Projekt in Resolve gefunden!", fg="#FF3030")
         except Exception:
@@ -186,6 +201,7 @@ class ResolveIngestGUI:
             self.combo_format.config(state=tk.DISABLED)
             self.chk_pancakes.config(state=tk.DISABLED)
             self.chk_auto_col.config(state=tk.DISABLED)
+            self.chk_backup.config(state=tk.DISABLED)
             self.combo_codec.config(state=tk.DISABLED)
             self.log_area.delete(1.0, tk.END)
             
@@ -193,13 +209,12 @@ class ResolveIngestGUI:
             format_mode = self.formats[selected_display_name]
             use_h265 = "H.265" in self.combo_codec.get()
             create_pancakes = self.var_create_pancakes.get()
+            backup_project = self.var_backup_project.get()  # Wert auslesen
             
             # Sicherstellen, dass alle Werte sauber aus der validierten Config gezogen werden
             camera_colors = self.config.get("camera_colors", {})
             camera_mappings = self.config.get("camera_mappings", [])
             base_drx_dir = self.config.get("BASE_DRX_DIR", "")
-            
-            # HIER DIE ENTSCHEIDENDEN PFADE AUSLESEN:
             base_target_dir = self.config.get("BASE_TARGET_DIR", "")
             base_proxy_dir = self.config.get("BASE_PROXY_DIR", "")
 
@@ -212,7 +227,8 @@ class ResolveIngestGUI:
                     "base_drx_dir": base_drx_dir,
                     "camera_mappings": camera_mappings,
                     "base_target_dir": base_target_dir,
-                    "base_proxy_dir": base_proxy_dir
+                    "base_proxy_dir": base_proxy_dir,
+                    "backup_project": backup_project                      # An Worker übergeben
                 },
                 daemon=True
             ).start()
@@ -222,11 +238,9 @@ class ResolveIngestGUI:
     def monitor_thread(self):
         log_content = self.log_area.get("1.0", tk.END)
         if "[FERTIG]" in log_content or "[FEHLER]" in log_content or "UNERWARTETER FEHLER" in log_content:
-            # Wenn Ingest beendet und Option aktiv ist, stoße das Farbmanagement an
             if "[FERTIG]" in log_content and self.var_auto_col.get():
                 self.log("\n[AUTOMATISIERUNG] Starte Farbmanagement via Metadaten an...")
                 try:
-                    # Ausführung im Hauptthread für maximale Stabilität mit der Resolve API
                     automate_color_management_by_bin()
                     self.log("[AUTOMATISIERUNG] Farbräume erfolgreich zugewiesen!")
                     self.log("[HINWEIS] Bitte bis auf Weiteres das \"Input Gamma\" manuell zuweisen!")
@@ -245,5 +259,6 @@ class ResolveIngestGUI:
                 self.combo_format.config(state="readonly")
                 self.chk_pancakes.config(state=tk.NORMAL)
                 self.chk_auto_col.config(state=tk.NORMAL)
+                self.chk_backup.config(state=tk.NORMAL)
         except Exception:
             pass
