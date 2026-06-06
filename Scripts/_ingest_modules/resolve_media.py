@@ -17,11 +17,40 @@ def create_resolve_bins(media_pool, root_folder):
     pancakes_bin = get_or_create_bin(media_pool, root_folder, "Pancakes")
     timelines_bin = get_or_create_bin(media_pool, root_folder, "Timelines")
     
+    # NEU: Der Ausschuss-Bin direkt auf der Root-Ebene für den unkomplizierten Workflow
+    get_or_create_bin(media_pool, root_folder, "_Ausschuss")
+    
     # Unter-Bins innerhalb von "Timelines" anlegen
     get_or_create_bin(media_pool, timelines_bin, "Landscape")
     get_or_create_bin(media_pool, timelines_bin, "Portrait")
     
     return footage_bin, pancakes_bin
+
+def get_all_filepaths_from_bin(target_bin):
+    """Sammelt rekursiv alle absoluten Dateipfade der Clips aus einem bestimmten Bin."""
+    paths = set()
+    if not target_bin:
+        return paths
+    for clip in target_bin.GetClipList():
+        if clip:
+            fp = clip.GetClipProperty("File Path")
+            if fp:
+                paths.add(os.path.abspath(fp))
+    for sub_bin in target_bin.GetSubFolderList():
+        paths.update(get_all_filepaths_from_bin(sub_bin))
+    return paths
+
+def find_all_clips_in_bin(target_bin):
+    """Sammelt rekursiv alle Clip-Objekte aus einem bestimmten Bin."""
+    clips = []
+    if not target_bin:
+        return clips
+    for clip in target_bin.GetClipList():
+        if clip:
+            clips.append(clip)
+    for sub_bin in target_bin.GetSubFolderList():
+        clips.extend(find_all_clips_in_bin(sub_bin))
+    return clips
 
 def get_clip_color_by_label(label, camera_colors):
     """Ermittelt die DaVinci Resolve Clip-Farbe dynamisch aus der config.json."""
@@ -75,7 +104,6 @@ def apply_drx_grading_to_timeline(timeline, base_drx_dir, camera_type, camera_ma
         return
 
     try:
-        # FIX HIER: Absicherung gegen API-Crashes und NoneType-Rückgaben bei leerem Track 1
         items = []
         try:
             raw_items = timeline.GetItemListInTrack("video", 1)
@@ -96,17 +124,15 @@ def apply_drx_grading_to_timeline(timeline, base_drx_dir, camera_type, camera_ma
             if hasattr(item, "GetNodeGraph") and item.GetNodeGraph is not None:
                 graph = item.GetNodeGraph()
                 if graph and hasattr(graph, "ApplyGradeFromDRX") and graph.ApplyGradeFromDRX is not None:
-                    # Gradings werden jetzt auf dem graph-Objekt angewendet
                     if graph.ApplyGradeFromDRX(drx_path, 0):
                         success_count += 1
-                        continue # Erfolgreich, weiter zum nächsten Clip
+                        continue
 
-            # FALLBACK für ältere Resolve-Versionen, falls GetNodeGraph nicht existiert
+            # FALLBACK für ältere Resolve-Versionen
             if hasattr(item, "ApplyGradeFromDRX") and item.ApplyGradeFromDRX is not None:
                 if item.ApplyGradeFromDRX(drx_path, 0):
                     success_count += 1
             else:
-                # Letzter Rettungsversuch über das MediaPoolItem
                 mp_item = item.GetMediaPoolItem()
                 if mp_item and hasattr(mp_item, "ApplyGradeFromDRX") and mp_item.ApplyGradeFromDRX is not None:
                     if mp_item.ApplyGradeFromDRX(drx_path, 0):

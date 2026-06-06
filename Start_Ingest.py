@@ -3,7 +3,7 @@ import os
 import json
 
 # Dieses Script muss in den Pfad von Davinci Resolve, also z.B.:
-# C:\ProgramData\Blackmagic Design\DaVinci Resolve\Fusion\Scripts\Edit
+# C:\ProgramData\Blackmagic Design\DaVinci Resolve\Fusion\Scripts\Comp 
 
 # Ermittelt das Verzeichnis, in dem DIESES Skript (Start_Ingest.py) liegt
 CURRENT_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))

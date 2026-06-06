@@ -30,36 +30,43 @@
             "input_color_space": "Panasonic V-Gamut",
             "drx_profile": "FM-STD-Panasonic-VLOG.drx"
         },
+
         {
+            "search_keywords": ["NEO2"],
+            "camera_type": "NEO2",
+            "input_color_space": "Rec.709",
+            "drx_profile": "FM-STD-Neo2-Rec709.drx"
+        },        {
             "search_keywords": ["MINI", "MINI4", "MINI3", "M4P"],
             "camera_type": "DJI_MINI",
             "input_color_space": "DJI D-Gamut",
-            "drx_profile": "FM-STD-DJI-DLOG-M.drx"
+            "drx_profile": "FM-STD-Mini4Pro-DLOG-M.drx"
         },
         {
             "search_keywords": ["AVATA2"],
             "camera_type": "DJI_AVATA2",
             "input_color_space": "DJI D-Gamut",
-            "drx_profile": "FM-STD-DJI-DLOG-M.drx"
+            "drx_profile": "FM-STD-Avata2-DLOG-M.drx"
         },
         {
+            "search_keywords": ["AVATA360"],
+            "camera_type": "DJI_AVATA360",
+            "input_color_space": "DJI D-Gamut",
+            "drx_profile": "FM-STD-Avata360-DLOG-M.drx"
+        },        {
             "search_keywords": ["ACTION2", "ACT2"],
             "camera_type": "DJI_ACTION2",
             "input_color_space": "DJI D-Gamut",
             "drx_profile": "FM-STD-DJI-DLOG-M.drx"
         },
-        {
-            "search_keywords": ["AVATA"],
-            "camera_type": "DJI",
-            "input_color_space": "DJI D-Gamut",
-            "drx_profile": "FM-STD-DJI-DLOG-M.drx"
-        },
+
         {
             "search_keywords": ["X4", "X3", "ONE", "GO"],
             "camera_type": "INSTA",
             "input_color_space": "Rec.709",
             "drx_profile": "FM-STD-GENERIC-REC709.drx"
         },
+
         {
             "search_keywords": ["REC709", "GENERIC", "UNKNOWN"],
             "camera_type": "REC709",

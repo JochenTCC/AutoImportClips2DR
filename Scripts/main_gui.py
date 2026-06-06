@@ -7,20 +7,18 @@ import tkinter as tk
 from tkinter import scrolledtext
 from tkinter import ttk
 
-# Importe aus dem Unterordner (Pfade entfernt, da sie nun aus config.json kommen)
 from _ingest_modules.config import WEEKDAYS_DE, VALID_EXTENSIONS
-from _ingest_modules.ingest_worker import run_ingest_process
-from main_ColMgmt import automate_color_management_by_bin # Neu importiert für die Automatisierung
+from _ingest_modules.ingest_worker import run_ingest_process, run_cleanup_process
+from main_ColMgmt import automate_color_management_by_bin
 
 class ResolveIngestGUI:
     def __init__(self, root, config=None):
         self.root = root
-        # Falls keine Config übergeben wurde, leeres Dict nutzen
         self.config = config if config is not None else {}
         
         self.root.title("Resolve Ingest Automation (Modular)")
-        self.root.geometry("750x750")  # Höhe leicht erhöht für die neue Option
-        self.root.minsize(650, 650)
+        self.root.geometry("750x720")
+        self.root.minsize(650, 600)
         
         self.bg_color = "#242424"
         self.fg_color = "#E0E0E0"
@@ -29,7 +27,6 @@ class ResolveIngestGUI:
         self.root.configure(bg=self.bg_color)
         self.format_permanently_locked = False
         
-        # Style für Checkboxen anpassen (dunkles Design)
         self.style = ttk.Style()
         self.style.theme_use('default')
         self.style.configure("Dark.TCheckbutton", background=self.bg_color, foreground=self.fg_color, focuscolor=self.bg_color)
@@ -44,7 +41,6 @@ class ResolveIngestGUI:
                                            font=("Helvetica", 9, "bold"), bg=self.bg_color, fg="#5CACEE", bd=1)
         self.frame_options.pack(pady=5, padx=15, fill=tk.X)
         
-        # Zeile 1: Format-Dropdown
         self.frame_row1 = tk.Frame(self.frame_options, bg=self.bg_color)
         self.frame_row1.pack(fill=tk.X, padx=5, pady=2)
         
@@ -68,7 +64,6 @@ class ResolveIngestGUI:
         self.combo_format.current(0)
         self.combo_format.pack(side=tk.LEFT, padx=10, pady=5, fill=tk.X, expand=True)
         
-        # Zeile 2: Option für Pancake-Timelines
         self.frame_row2 = tk.Frame(self.frame_options, bg=self.bg_color)
         self.frame_row2.pack(fill=tk.X, padx=5, pady=2)
         
@@ -81,7 +76,6 @@ class ResolveIngestGUI:
         )
         self.chk_pancakes.pack(side=tk.LEFT, padx=5, pady=2)
         
-        # Zeile 3: Farbmanagement
         self.frame_row3 = tk.Frame(self.frame_options, bg=self.bg_color)
         self.frame_row3.pack(fill=tk.X, padx=5, pady=2)
         
@@ -93,19 +87,6 @@ class ResolveIngestGUI:
             style="Dark.TCheckbutton"
         )
         self.chk_auto_col.pack(side=tk.LEFT, padx=5, pady=2)
-
-        # Zeile 4: NEU - Projekt-Backup-Option
-        self.frame_row4 = tk.Frame(self.frame_options, bg=self.bg_color)
-        self.frame_row4.pack(fill=tk.X, padx=5, pady=2)
-        
-        self.var_backup_project = tk.BooleanVar(value=True)
-        self.chk_backup = ttk.Checkbutton(
-            self.frame_row4,
-            text="Automatisches Projekt-Backup (.drp) vor Ingest erstellen (Empfohlen)",
-            variable=self.var_backup_project,
-            style="Dark.TCheckbutton"
-        )
-        self.chk_backup.pack(side=tk.LEFT, padx=5, pady=2)
                 
         # --- Bereich: Proxy-Einstellungen ---
         self.frame_proxy_settings = tk.LabelFrame(root, text=" Proxy-Videoeinstellungen (NVIDIA NVENC beschleunigt) ", 
@@ -120,11 +101,21 @@ class ResolveIngestGUI:
         self.combo_codec.current(0)
         self.combo_codec.pack(side=tk.LEFT, padx=10, pady=10, fill=tk.X, expand=True)
         
-        self.btn_sync = tk.Button(root, text="SD-Karten synchronisieren, konvertieren & importieren", 
+        # Horizontales Frame für zwei Buttons nebeneinander
+        self.frame_buttons = tk.Frame(root, bg=self.bg_color)
+        self.frame_buttons.pack(pady=5)
+        
+        self.btn_sync = tk.Button(self.frame_buttons, text="SD-Karten synchronisieren, konvertieren & importieren", 
                                   command=self.start_sync_thread, font=("Helvetica", 11, "bold"),
                                   bg=self.btn_color, fg="white", activebackground="#CD3700", 
                                   padx=15, pady=5, cursor="hand2")
-        self.btn_sync.pack(pady=5)
+        self.btn_sync.pack(side=tk.LEFT, padx=5)
+        
+        self.btn_cleanup = tk.Button(self.frame_buttons, text="Timeline-Ausschuss bereinigen", 
+                                     command=self.start_cleanup_thread, font=("Helvetica", 11, "bold"),
+                                     bg="#4A4A4A", fg="white", activebackground="#6A6A6A", 
+                                     padx=15, pady=5, cursor="hand2")
+        self.btn_cleanup.pack(side=tk.LEFT, padx=5)
         
         self.log_area = scrolledtext.ScrolledText(root, wrap=tk.WORD, width=80, height=18, 
                                                  bg="#1A1A1A", fg="#00FF00", font=("Consolas", 9))
@@ -179,61 +170,72 @@ class ResolveIngestGUI:
                         elif detected == "COUNTER": self.combo_format.current(2)
                         elif detected == "NONE": self.combo_format.current(3)
                         
-                        # Alle Strukturierungs- und Automatisierungsoptionen einfrieren
                         self.combo_format.config(state=tk.DISABLED)
                         self.chk_pancakes.config(state=tk.DISABLED)
                         self.chk_auto_col.config(state=tk.DISABLED)
-                        self.chk_backup.config(state=tk.DISABLED)
                         self.frame_options.config(text=" Strukturierung & Automatisierung (Gesperrt: Einstellungen aus bestehendem Ingest aktiv) ", fg="#FFCC00")
                     else:
                         self.format_permanently_locked = False
                         self.combo_format.config(state="readonly")
                         self.chk_pancakes.config(state=tk.NORMAL)
                         self.chk_auto_col.config(state=tk.NORMAL)
-                        self.chk_backup.config(state=tk.NORMAL)
                     return
             self.lbl_project.config(text="Kein geöffnetes Projekt in Resolve gefunden!", fg="#FF3030")
         except Exception:
             self.lbl_project.config(text="Verbindung zu DaVinci Resolve nicht möglich.", fg="#FF3030")
 
     def start_sync_thread(self):
-            self.btn_sync.config(state=tk.DISABLED)
-            self.combo_format.config(state=tk.DISABLED)
-            self.chk_pancakes.config(state=tk.DISABLED)
-            self.chk_auto_col.config(state=tk.DISABLED)
-            self.chk_backup.config(state=tk.DISABLED)
-            self.combo_codec.config(state=tk.DISABLED)
-            self.log_area.delete(1.0, tk.END)
-            
-            selected_display_name = self.combo_format.get()
-            format_mode = self.formats[selected_display_name]
-            use_h265 = "H.265" in self.combo_codec.get()
-            create_pancakes = self.var_create_pancakes.get()
-            backup_project = self.var_backup_project.get()  # Wert auslesen
-            
-            # Sicherstellen, dass alle Werte sauber aus der validierten Config gezogen werden
-            camera_colors = self.config.get("camera_colors", {})
-            camera_mappings = self.config.get("camera_mappings", [])
-            base_drx_dir = self.config.get("BASE_DRX_DIR", "")
-            base_target_dir = self.config.get("BASE_TARGET_DIR", "")
-            base_proxy_dir = self.config.get("BASE_PROXY_DIR", "")
+        self.btn_sync.config(state=tk.DISABLED)
+        self.btn_cleanup.config(state=tk.DISABLED)
+        self.combo_format.config(state=tk.DISABLED)
+        self.chk_pancakes.config(state=tk.DISABLED)
+        self.chk_auto_col.config(state=tk.DISABLED)
+        self.combo_codec.config(state=tk.DISABLED)
+        self.log_area.delete(1.0, tk.END)
+        
+        selected_display_name = self.combo_format.get()
+        format_mode = self.formats[selected_display_name]
+        use_h265 = "H.265" in self.combo_codec.get()
+        create_pancakes = self.var_create_pancakes.get()
+        
+        camera_colors = self.config.get("camera_colors", {})
+        camera_mappings = self.config.get("camera_mappings", [])
+        base_drx_dir = self.config.get("BASE_DRX_DIR", "")
+        base_target_dir = self.config.get("BASE_TARGET_DIR", "")
+        base_proxy_dir = self.config.get("BASE_PROXY_DIR", "")
 
-            # Nutzung von kwargs für maximale Sicherheit gegen Verschiebungen
-            threading.Thread(
-                target=run_ingest_process, 
-                args=(format_mode, use_h265, self.log, create_pancakes),  # Pflichtparameter
-                kwargs={                                                  # Optionale Parameter explizit benannt
-                    "camera_colors": camera_colors,
-                    "base_drx_dir": base_drx_dir,
-                    "camera_mappings": camera_mappings,
-                    "base_target_dir": base_target_dir,
-                    "base_proxy_dir": base_proxy_dir,
-                    "backup_project": backup_project                      # An Worker übergeben
-                },
-                daemon=True
-            ).start()
-            
-            self.root.after(500, self.monitor_thread)
+        threading.Thread(
+            target=run_ingest_process, 
+            args=(format_mode, use_h265, self.log, create_pancakes),
+            kwargs={
+                "camera_colors": camera_colors,
+                "base_drx_dir": base_drx_dir,
+                "camera_mappings": camera_mappings,
+                "base_target_dir": base_target_dir,
+                "base_proxy_dir": base_proxy_dir
+            },
+            daemon=True
+        ).start()
+        
+        self.root.after(500, self.monitor_thread)
+
+    def start_cleanup_thread(self):
+        """Startet den Bereinigungsprozess in einem Hintergrundthread."""
+        self.btn_sync.config(state=tk.DISABLED)
+        self.btn_cleanup.config(state=tk.DISABLED)
+        self.combo_format.config(state=tk.DISABLED)
+        self.chk_pancakes.config(state=tk.DISABLED)
+        self.chk_auto_col.config(state=tk.DISABLED)
+        self.combo_codec.config(state=tk.DISABLED)
+        self.log_area.delete(1.0, tk.END)
+        
+        threading.Thread(
+            target=run_cleanup_process,
+            args=(self.log,),
+            daemon=True
+        ).start()
+        
+        self.root.after(500, self.monitor_cleanup_thread)
             
     def monitor_thread(self):
         log_content = self.log_area.get("1.0", tk.END)
@@ -251,14 +253,22 @@ class ResolveIngestGUI:
         else:
             self.root.after(500, self.monitor_thread)
 
+    def monitor_cleanup_thread(self):
+        """Überwacht den Status des Cleanup-Prozesses."""
+        log_content = self.log_area.get("1.0", tk.END)
+        if "[FERTIG]" in log_content or "[FEHLER]" in log_content or "UNERWARTETER FEHLER" in log_content:
+            self.unlock_gui_safely()
+        else:
+            self.root.after(500, self.monitor_cleanup_thread)
+
     def unlock_gui_safely(self):
         try:
             self.btn_sync.config(state=tk.NORMAL)
+            self.btn_cleanup.config(state=tk.NORMAL)
             self.combo_codec.config(state="readonly")
             if not self.format_permanently_locked:
                 self.combo_format.config(state="readonly")
                 self.chk_pancakes.config(state=tk.NORMAL)
                 self.chk_auto_col.config(state=tk.NORMAL)
-                self.chk_backup.config(state=tk.NORMAL)
         except Exception:
             pass
