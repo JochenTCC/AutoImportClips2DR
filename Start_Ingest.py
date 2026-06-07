@@ -69,6 +69,7 @@ else:
     ScriptPath = CURRENT_SCRIPT_DIR
 
 try:
+    ScriptPath = f"{CURRENT_SCRIPT_DIR}\Scripts"
     sys.path.append(ScriptPath)
     
     # Konfiguration laden, automatisch zusammensetzen und strikt validieren
