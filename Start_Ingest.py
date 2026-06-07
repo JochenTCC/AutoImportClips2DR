@@ -6,8 +6,17 @@ import json
 # C:\ProgramData\Blackmagic Design\DaVinci Resolve\Fusion\Scripts\Comp 
 
 # Ermittelt das Verzeichnis, in dem DIESES Skript (Start_Ingest.py) liegt
-CURRENT_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-
+# Robuster Schutz, da DaVinci Resolve bei interner Skript-Ausführung kein __file__ bereitstellt
+try:
+    THIS_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+except NameError:
+    # Fallback 1: Prüfen, ob Resolve den Pfad eventuell via Argumente übergibt
+    if len(sys.argv) > 0 and sys.argv[0] and os.path.exists(sys.argv[0]):
+        THIS_SCRIPT_DIR = os.path.dirname(os.path.abspath(sys.argv[0]))
+    else:
+        # Fallback 2: Fixer Windows-Standardpfad für Resolve Fusion Scripts
+        THIS_SCRIPT_DIR = r"C:\ProgramData\Blackmagic Design\DaVinci Resolve\Fusion\Scripts\Comp"
+        
 def load_and_validate_config(script_dir):
     config_path = os.path.join(script_dir, 'config.json')
     
@@ -66,14 +75,14 @@ ScriptPath = os.getenv("AUTOIMPORTCLIPS2DR_SCRIPT_PATH")
 if ScriptPath:
     ScriptPath = os.path.abspath(os.path.expanduser(ScriptPath))
 else:
-    ScriptPath = CURRENT_SCRIPT_DIR
+    ScriptPath = THIS_SCRIPT_DIR
 
 try:
-    ScriptPath = f"{CURRENT_SCRIPT_DIR}\Scripts"
-    sys.path.append(ScriptPath)
-    
     # Konfiguration laden, automatisch zusammensetzen und strikt validieren
-    config = load_and_validate_config(CURRENT_SCRIPT_DIR)
+    config = load_and_validate_config(THIS_SCRIPT_DIR)
+    
+    ScriptPath = f"{ScriptPath}\Scripts"
+    sys.path.append(ScriptPath)
     
     # 1. Modul importieren
     import main_gui
