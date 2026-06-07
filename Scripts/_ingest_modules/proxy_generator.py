@@ -2,48 +2,25 @@
 import os
 import sys
 import subprocess
-import time  # Importiert für die Stoppuhr
+import time
+import threading
+import queue
 
-def render_and_link_proxies_ffmpeg(raw_queue, use_h264_or_h265, log_callback):
-    """Verarbeitet die Proxy-Queue und führt das hardwarebeschleunigte FFmpeg-Rendering durch."""
-    render_jobs = []
-    for clip, source_path, proxy_dir in raw_queue:
-        clip_name = os.path.basename(source_path)
-        expected_proxy_path = os.path.join(proxy_dir, clip_name)
-        os.makedirs(proxy_dir, exist_ok=True)
+def ffmpeg_proxy_worker(task_queue, video_codec_args, startupinfo, log_callback):
+    """
+    Worker-Thread, der kontinuierlich Rendering-Tasks aus der Queue abarbeitet,
+    während der Haupt-Thread weiter kopiert und in Resolve importiert.
+    """
+    while True:
+        task = task_queue.get()
+        if task is None:  # Sentinel-Signal zum Beenden des Threads
+            task_queue.task_done()
+            break
         
-        if os.path.exists(expected_proxy_path):
-            log_callback(f"   [BEREITS VORHANDEN] Proxy existiert: {clip_name}")
-            try: clip.LinkProxyMedia(expected_proxy_path)
-            except Exception: pass
-        else:
-            render_jobs.append((clip, source_path, expected_proxy_path))
-    
-    if not render_jobs:
-        log_callback("\n[HINWEIS] Keine neuen Videos zum Rendern in der Queue.")
-        return
-        
-    total_jobs = len(render_jobs)
-    log_callback(f"\n[SCHRITT 2/2] Starte Proxy-Generierung für {total_jobs} neue Proxies...")
-    
-    if use_h264_or_h265: # True für H.265
-        video_codec_args = ["-c:v", "hevc_nvenc", "-preset", "p4", "-cq", "28"]
-    else:
-        video_codec_args = ["-c:v", "h264_nvenc", "-preset", "p4", "-cq", "26", "-pix_fmt", "yuv420p"]
-    
-    startupinfo = None
-    if sys.platform == "win32":
-        startupinfo = subprocess.STARTUPINFO()
-        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-        startupinfo.wShowWindow = 0
-    
-    # --- STOPPUHR START ---
-    start_time = time.perf_counter()
-    
-    for idx, (clip, source_path, expected_proxy_path) in enumerate(render_jobs, start=1):
+        source_path, expected_proxy_path, codec_label = task
         clip_name = os.path.basename(source_path)
-        codec_label = "H.265" if use_h264_or_h265 else "H.264"
-        log_callback(f"   [{idx}/{total_jobs}] Rendere {codec_label}-Proxy: {clip_name} ...")
+        
+        log_callback(f"   [BACKGROUND PROXY] Starte FFmpeg-Rendering ({codec_label}): {clip_name} ...")
         
         filter_str = "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2"
         
@@ -60,64 +37,91 @@ def render_and_link_proxies_ffmpeg(raw_queue, use_h264_or_h265, log_callback):
         ]
         
         try:
+            # Render-Vorgang ausführen
             subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True, startupinfo=startupinfo)
-            if os.path.exists(expected_proxy_path):
-                success = clip.LinkProxyMedia(expected_proxy_path)
-                if success:
-                    log_callback(f"       -> [OK] Proxy erfolgreich verknüpft.")
+            log_callback(f"   [BACKGROUND PROXY] -> [OK] Rendering abgeschlossen: {clip_name}")
         except subprocess.CalledProcessError as e:
-            log_callback(f"       -> [FEHLER] FFmpeg-Rendering fehlgeschlagen für {clip_name}")
+            log_callback(f"   [BACKGROUND PROXY] -> [FEHLER] FFmpeg-Rendering fehlgeschlagen für {clip_name}")
             if e.stderr:
                 error_lines = e.stderr.strip().split('\n')[-3:]
                 for err_line in error_lines:
                     log_callback(f"          | {err_line}")
         except Exception as e:
-            log_callback(f"       -> [API FEHLER] Verknüpfung fehlgeschlagen: {e}")
+            log_callback(f"   [BACKGROUND PROXY] -> [FEHLER] Unerwarteter Systemfehler: {e}")
 
-    # --- STOPPUHR ENDE & AUSWERTUNG ---
-    end_time = time.perf_counter()
-    duration = end_time - start_time
-    avg_per_clip = duration / total_jobs if total_jobs > 0 else 0
+        task_queue.task_done()
+
+
+def init_background_proxy_engine(use_h264_or_h265, log_callback):
+    """Initialisiert die Queue und startet den parallelen FFmpeg-Background-Thread."""
+    task_queue = queue.Queue()
     
-    log_callback(f"\n⏱️  [BENCHMARK FFmpeg]")
-    log_callback(f"    - Gesamte Renderzeit: {duration:.2f} Sekunden ({duration/60:.2f} Minuten)")
-    log_callback(f"    - Durchschnitt pro Clip: {avg_per_clip:.2f} Sekunden")
+    if use_h264_or_h265:  # True für H.265
+        video_codec_args = ["-c:v", "hevc_nvenc", "-preset", "p4", "-cq", "28"]
+        codec_label = "H.265"
+    else:
+        video_codec_args = ["-c:v", "h264_nvenc", "-preset", "p4", "-cq", "26", "-pix_fmt", "yuv420p"]
+        codec_label = "H.264"
+        
+    startupinfo = None
+    if sys.platform == "win32":
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = 0
+        
+    worker_thread = threading.Thread(
+        target=ffmpeg_proxy_worker, 
+        args=(task_queue, video_codec_args, startupinfo, log_callback),
+        daemon=True
+    )
+    worker_thread.start()
+    
+    log_callback(f"[PROXY ENGINE] Parallel-Pipeline für {codec_label} (NVENC CUDA) erfolgreich initialisiert.")
+    return task_queue, worker_thread
+
+
+def link_finished_proxies(raw_queue, log_callback):
+    """Verknüpft alle generierten Proxies sicher auf dem Haupt-Thread mit der Resolve-Datenbank."""
+    log_callback("\n[SCHRITT 2/2] Verknüpfung der fertiggestellten Proxies mit Resolve Media Pool...")
+    linked_count = 0
+    
+    for clip, expected_proxy_path in raw_queue:
+        if os.path.exists(expected_proxy_path):
+            try:
+                success = clip.LinkProxyMedia(expected_proxy_path)
+                if success:
+                    linked_count += 1
+            except Exception as e:
+                log_callback(f"       [API FEHLER] Verbindung fehlgeschlagen für {os.path.basename(expected_proxy_path)}: {e}")
+        else:
+            log_callback(f"       [WARNUNG] Proxy-Datei physisch nicht auffindbar: {os.path.basename(expected_proxy_path)}")
+            
+    log_callback(f"[INFO] {linked_count} von {len(raw_queue)} Proxies erfolgreich in Resolve verknüpft.")
 
 
 def render_and_link_proxies_DR_Engine(raw_queue, use_h264_or_h265, log_callback, current_project=None):
     """
-    Verarbeitet die Proxy-Queue nativ über die DaVinci Resolve Render-Engine.
-    Erzeugt Proxies direkt im in Resolve definierten Proxy-Pfad und Format.
-    Überprüft live, ob die Proxy-Datei auch tatsächlich physisch auf der Festplatte existiert.
+    Nativer Fallback für Resolve Render-Engine. 
+    HINWEIS: Läuft sequentiell, da die Resolve-API bei interner Generierung blockiert.
     """
-    # Fallback, falls das Projekt-Objekt nicht übergeben wurde (über die API nachladen)
     if not current_project:
         try:
             import DaVinciResolveScript as dvr_script
             resolve = dvr_script.scriptapp("Resolve")
             if resolve:
                 current_project = resolve.GetProjectManager().GetCurrentProject()
-        except Exception:
-            pass
+        except Exception: pass
 
     if not current_project:
-        log_callback("[FEHLER] Resolve-Projektkontext konnte für die Proxy-Generierung nicht ermittelt werden.")
+        log_callback("[FEHLER] Resolve-Projektkontext konnte nicht ermittelt werden.")
         return
 
     clips_to_render = []
-    
-    for clip, source_path, proxy_dir in raw_queue:
-        clip_name = os.path.basename(source_path)
-        
-        # Datenbank-Eigenschaft abfragen
+    for clip, expected_proxy_path in raw_queue:
         proxy_property = clip.GetClipProperty("Proxy")
-        
-        # Validierung: Existiert der Proxy laut DB UND liegt die Datei wirklich dort?
         if proxy_property != "None" and os.path.exists(proxy_property):
-            log_callback(f"   [BEREITS VORHANDEN] Interner Proxy existiert für: {clip_name}")
+            log_callback(f"   [BEREITS VORHANDEN] Interner Proxy existiert für: {clip.GetName()}")
         else:
-            if proxy_property != "None" and not os.path.exists(proxy_property):
-                log_callback(f"   [OFFLINE] Resolve-DB verweist auf Proxy, Datei fehlt aber auf Festplatte. Wird neu erstellt: {clip_name}")
             clips_to_render.append(clip)
             
     if not clips_to_render:
@@ -126,35 +130,21 @@ def render_and_link_proxies_DR_Engine(raw_queue, use_h264_or_h265, log_callback,
         
     total_jobs = len(clips_to_render)
     log_callback(f"\n[SCHRITT 2/2] Starte native DaVinci Resolve Proxy-Generierung für {total_jobs} Clips...")
-    log_callback("   [INFO] Resolve nutzt hierfür die in den Projekt-Einstellungen definierten Cache/Proxy-Codecs.")
     
-    # --- STOPPUHR START ---
     start_time = time.perf_counter()
-    
     try:
-        # KORREKTUR: GenerateProxyMedia wird direkt auf dem current_project aufgerufen
         success = current_project.GenerateProxyMedia(clips_to_render)
-        
         if success:
             log_callback(f"       -> [OK] Alle {total_jobs} Proxies intern generiert und verknüpft.")
         else:
-            log_callback("       -> [WARNUNG] Batch-Generierung von Resolve abgelehnt. Versuche Einzelverarbeitung...")
             for idx, clip in enumerate(clips_to_render, start=1):
-                c_name = clip.GetName()
-                log_callback(f"          [{idx}/{total_jobs}] Generiere Proxy für: {c_name} ...")
                 if clip.GenerateProxyMedia():
-                    log_callback(f"             -> [OK] Erstellt.")
+                    log_callback(f"             -> [{idx}/{total_jobs}] [OK] Erstellt: {clip.GetName()}")
                 else:
-                    log_callback(f"             -> [FEHLER] Resolve verweigerte Generierung für {c_name}")
-                    
+                    log_callback(f"             -> [{idx}/{total_jobs}] [FEHLER] Abgelehnt für {clip.GetName()}")
     except Exception as e:
         log_callback(f"       -> [API FEHLER] Fehler während der internen Proxy-Generierung: {e}")
 
-    # --- STOPPUHR ENDE & AUSWERTUNG ---
     end_time = time.perf_counter()
     duration = end_time - start_time
-    avg_per_clip = duration / total_jobs if total_jobs > 0 else 0
-    
-    log_callback(f"\n⏱️  [BENCHMARK Resolve Engine]")
-    log_callback(f"    - Gesamte Renderzeit: {duration:.2f} Sekunden ({duration/60:.2f} Minuten)")
-    log_callback(f"    - Durchschnitt pro Clip: {avg_per_clip:.2f} Sekunden")
+    log_callback(f"\n⏱️  [BENCHMARK Resolve Engine] Gesamte Renderzeit: {duration:.2f} Sekunden")
