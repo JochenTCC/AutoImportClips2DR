@@ -1,21 +1,18 @@
 #!/usr/bin/env python
 import os
 import time
-from datetime import datetime
 
-from .config import PROXY_ELIGIBLE_EXTENSIONS, WEEKDAYS_DE
 from .utils import (
-    get_connected_sd_cards, has_media_files, get_media_dates_from_card,
-    extract_start_date_from_name, get_media_files_from_dir, get_media_files_flattened
+    get_connected_sd_cards, has_media_files, 
+    extract_start_date_from_name, get_media_files_from_dir
 )
-from .drive_ops import create_physical_directories, copy_files_via_robocopy
+from .drive_ops import create_physical_directories
 from .resolve_media import (
-    get_or_create_bin, create_resolve_bins, get_clip_color_by_label,  
-    tag_media_pool_items, apply_drx_grading_to_timeline,
+    get_or_create_bin, create_resolve_bins, 
     get_all_filepaths_from_bin, find_all_clips_in_bin
 )
 from .proxy_generator import render_and_link_proxies_ffmpeg
-from .card_processor import process_single_sd_card
+from .source_processor import ingest_media_source
 
 def run_ingest_process(format_mode, use_h265, log_callback, create_pancakes, config, progress_callback=None):
     """Haupt-Einstiegspunkt für den Ingest-Prozess (Orchestrator) mit Multi-Threading."""
@@ -60,7 +57,6 @@ def run_ingest_process(format_mode, use_h265, log_callback, create_pancakes, con
                     if os.path.isdir(os.path.join(footage_dir, item)) and item.lower() != "proxies":
                         detected_sd_cards[item] = None
                 if not detected_sd_cards:
-                    from .utils import get_media_files_from_dir
                     if get_media_files_from_dir(footage_dir):
                         detected_sd_cards["FOOTAGE_ROOT"] = None
         
@@ -77,8 +73,7 @@ def run_ingest_process(format_mode, use_h265, log_callback, create_pancakes, con
             if source_drive and not has_media_files(source_drive):
                 continue
             
-            # Reicht das gesamte Config-Objekt direkt an den Card-Processor weiter
-            process_single_sd_card(
+            ingest_media_source(
                 label, source_drive, format_mode, project_start_date,
                 footage_dir, project_proxy_dir, current_project, media_pool, footage_bin,
                 pancakes_bin, create_pancakes, log_callback, raw_queue, config,
