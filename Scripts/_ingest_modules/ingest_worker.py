@@ -10,7 +10,7 @@ from .utils import (
 )
 from .drive_ops import create_physical_directories, copy_files_via_robocopy
 from .resolve_media import (
-    get_or_create_bin, create_resolve_bins, get_clip_color_by_label,  # KORREKTUR: Komma hinzugefügt
+    get_or_create_bin, create_resolve_bins, get_clip_color_by_label,  
     tag_media_pool_items, apply_drx_grading_to_timeline,
     get_all_filepaths_from_bin, find_all_clips_in_bin
 )

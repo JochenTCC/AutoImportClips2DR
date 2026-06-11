@@ -1,0 +1,1 @@
+﻿{"version": "0.2.0","configurations": [{"name": "Python: Run Start_Ingest.py","type": "python","request": "launch","program": "${workspaceFolder}/Start_Ingest.py","console": "integratedTerminal","cwd": "${workspaceFolder}","justMyCode": false}]}

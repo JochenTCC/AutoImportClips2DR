@@ -81,7 +81,7 @@ try:
     # Konfiguration laden, automatisch zusammensetzen und strikt validieren
     config = load_and_validate_config(THIS_SCRIPT_DIR)
     
-    ScriptPath = f"{ScriptPath}\Scripts"
+    ScriptPath = f"{ScriptPath}\\Scripts"
     sys.path.append(ScriptPath)
     
     # 1. Modul importieren
