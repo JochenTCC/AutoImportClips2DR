@@ -17,8 +17,8 @@ class ResolveIngestGUI:
         self.config = config if config is not None else {}
         
         self.root.title("Resolve Ingest Automation (Modular)")
-        self.root.geometry("750x720")
-        self.root.minsize(650, 600)
+        self.root.geometry("750x760")
+        self.root.minsize(650, 650)
         
         self.bg_color = "#242424"
         self.fg_color = "#E0E0E0"
@@ -31,6 +31,9 @@ class ResolveIngestGUI:
         self.style.theme_use('default')
         self.style.configure("Dark.TCheckbutton", background=self.bg_color, foreground=self.fg_color, focuscolor=self.bg_color)
         self.style.map("Dark.TCheckbutton", background=[('disabled', self.bg_color)], foreground=[('disabled', '#888888')])
+        
+        # Style für die Fortschrittsanzeige anpassen (Dunkles Design)
+        self.style.configure("Horizontal.TProgressbar", thickness=15, troughcolor="#333333", background=self.btn_color)
         
         self.lbl_project = tk.Label(root, text="Suche aktives DaVinci Resolve Projekt...", 
                                     font=("Helvetica", 12, "bold"), bg=self.bg_color, fg=self.fg_color)
@@ -117,15 +120,35 @@ class ResolveIngestGUI:
                                      padx=15, pady=5, cursor="hand2")
         self.btn_cleanup.pack(side=tk.LEFT, padx=5)
         
-        self.log_area = scrolledtext.ScrolledText(root, wrap=tk.WORD, width=80, height=18, 
+        # --- NEU: Bereich für Status-Anzeige und Fortschrittsbalken ---
+        self.frame_progress = tk.Frame(root, bg=self.bg_color)
+        self.frame_progress.pack(fill=tk.X, padx=15, pady=5)
+        
+        self.lbl_status = tk.Label(self.frame_progress, text="Status: Bereit", font=("Helvetica", 10, "bold"), bg=self.bg_color, fg="#A0A0A0")
+        self.lbl_status.pack(anchor=tk.W, pady=2)
+        
+        self.progress_bar = ttk.Progressbar(self.frame_progress, orient="horizontal", mode="determinate", style="Horizontal.TProgressbar")
+        self.progress_bar.pack(fill=tk.X, pady=2)
+        
+        self.log_area = scrolledtext.ScrolledText(root, wrap=tk.WORD, width=80, height=16, 
                                                  bg="#1A1A1A", fg="#00FF00", font=("Consolas", 9))
-        self.log_area.pack(padx=15, pady=15, fill=tk.BOTH, expand=True)
+        self.log_area.pack(padx=15, pady=10, fill=tk.BOTH, expand=True)
         
         self.update_project_name()
 
     def log(self, message):
         self.log_area.insert(tk.END, message + "\n")
         self.log_area.see(tk.END)
+
+    def update_progress(self, percent, status_text=None):
+        """Erlaubt fahrplanmäßige, thread-sichere Aktualisierungen aus den Ingest-Worker-Threads."""
+        self.root.after(0, lambda: self._update_progress_ui(percent, status_text))
+
+    def _update_progress_ui(self, percent, status_text):
+        if percent is not None:
+            self.progress_bar['value'] = percent
+        if status_text is not None:
+            self.lbl_status.config(text=f"Status: {status_text}", fg="#FF4500" if percent < 100 else "#5CACEE")
 
     def detect_existing_format(self, project_name):
         base_target_dir = self.config.get("BASE_TARGET_DIR", "")
@@ -193,6 +216,9 @@ class ResolveIngestGUI:
         self.combo_codec.config(state=tk.DISABLED)
         self.log_area.delete(1.0, tk.END)
         
+        self.update_progress(0, "Analysiere Speichermedien...")
+        self.progress_bar.config(mode="determinate")
+        
         selected_display_name = self.combo_format.get()
         format_mode = self.formats[selected_display_name]
         use_h265 = "H.265" in self.combo_codec.get()
@@ -212,7 +238,8 @@ class ResolveIngestGUI:
                 "base_drx_dir": base_drx_dir,
                 "camera_mappings": camera_mappings,
                 "base_target_dir": base_target_dir,
-                "base_proxy_dir": base_proxy_dir
+                "base_proxy_dir": base_proxy_dir,
+                "progress_callback": self.update_progress  # Übergabe des Callbacks an Ingest
             },
             daemon=True
         ).start()
@@ -220,7 +247,7 @@ class ResolveIngestGUI:
         self.root.after(500, self.monitor_thread)
 
     def start_cleanup_thread(self):
-        """Startet den Bereinigungsprozess in einem Hintergrundthread."""
+        """Startet den Bereinigungsprozess in einem Hintergrundthread mit pulsierendem Balken."""
         self.btn_sync.config(state=tk.DISABLED)
         self.btn_cleanup.config(state=tk.DISABLED)
         self.combo_format.config(state=tk.DISABLED)
@@ -228,6 +255,10 @@ class ResolveIngestGUI:
         self.chk_auto_col.config(state=tk.DISABLED)
         self.combo_codec.config(state=tk.DISABLED)
         self.log_area.delete(1.0, tk.END)
+        
+        self.update_progress(0, "Bereinige Timeline-Ausschuss...")
+        self.progress_bar.config(mode="indeterminate")
+        self.progress_bar.start(10)
         
         threading.Thread(
             target=run_cleanup_process,
@@ -241,6 +272,7 @@ class ResolveIngestGUI:
         log_content = self.log_area.get("1.0", tk.END)
         if "[FERTIG]" in log_content or "[FEHLER]" in log_content or "UNERWARTETER FEHLER" in log_content:
             if "[FERTIG]" in log_content and self.var_auto_col.get():
+                self.update_progress(95, "Farbmanagement via Metadaten...")
                 self.log("\n[AUTOMATISIERUNG] Starte Farbmanagement via Metadaten an...")
                 try:
                     automate_color_management_by_bin()
@@ -263,6 +295,14 @@ class ResolveIngestGUI:
 
     def unlock_gui_safely(self):
         try:
+            self.progress_bar.stop()
+            self.progress_bar.config(mode="determinate")
+            log_content = self.log_area.get("1.0", tk.END)
+            if "[FERTIG]" in log_content:
+                self.update_progress(100, "Vorgang erfolgreich beendet!")
+            else:
+                self.update_progress(0, "Vorgang mit Fehlern abgebrochen.")
+                
             self.btn_sync.config(state=tk.NORMAL)
             self.btn_cleanup.config(state=tk.NORMAL)
             self.combo_codec.config(state="readonly")

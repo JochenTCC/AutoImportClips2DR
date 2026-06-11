@@ -10,19 +10,19 @@ from .utils import (
 )
 from .drive_ops import create_physical_directories, copy_files_via_robocopy
 from .resolve_media import (
-    get_or_create_bin, create_resolve_bins, get_clip_color_by_label,
+    get_or_create_bin, create_resolve_bins, get_clip_color_by_label,  # KORREKTUR: Komma hinzugefügt
     tag_media_pool_items, apply_drx_grading_to_timeline,
     get_all_filepaths_from_bin, find_all_clips_in_bin
 )
-from .proxy_generator import init_background_proxy_engine, link_finished_proxies
+# KORREKTUR: Importiert nun die existierende Funktion aus proxy_generator.py
+from .proxy_generator import render_and_link_proxies_ffmpeg
 
 
 def process_single_sd_card(label, source_drive, format_mode, project_start_date, 
                            footage_dir, project_proxy_dir, current_project, media_pool, footage_bin, 
                            pancakes_bin, create_pancakes, log_callback, raw_queue, camera_colors,
-                           base_drx_dir, camera_mappings, trash_filepaths=None,
-                           proxy_task_queue=None, use_h265=False):
-    """Verarbeitet eine SD-Karte oder ein lokales Verzeichnis mit sofortiger Weitergabe an die Proxy-Queue."""
+                           base_drx_dir, camera_mappings, trash_filepaths=None, use_h265=False):
+    """Verarbeitet eine SD-Karte oder ein lokales Verzeichnis mit Weitergabe an die Proxy-Queue."""
     if trash_filepaths is None:
         trash_filepaths = set()
 
@@ -61,7 +61,6 @@ def process_single_sd_card(label, source_drive, format_mode, project_start_date,
     os.makedirs(cam_base_target_dir, exist_ok=True)
     cam_bin = get_or_create_bin(media_pool, footage_bin, bin_label)
     group_keyword = f"{camera_type}"
-    codec_label = "H.265" if use_h265 else "H.264"
     
     if format_mode != "NONE":
         date_groups = get_media_dates_from_card(source_drive if source_drive else cam_base_target_dir)
@@ -128,12 +127,9 @@ def process_single_sd_card(label, source_drive, format_mode, project_start_date,
                             try: clip.LinkProxyMedia(expected_proxy_path)
                             except Exception: pass
                         else:
-                            # Für die spätere Main-Thread-Verknüpfung registrieren
-                            raw_queue.append((clip, expected_proxy_path))
-                            # Sofort in die Hintergrund-Queue schieben
-                            if proxy_task_queue is not None:
-                                clip_path_on_disk = os.path.join(day_target_dir, clip_name)
-                                proxy_task_queue.put((clip_path_on_disk, expected_proxy_path, codec_label))
+                            # KORREKTUR: Befüllt die Queue passend für proxy_generator.py mit (clip, source_path, proxy_dir)
+                            clip_path_on_disk = os.path.join(day_target_dir, clip_name)
+                            raw_queue.append((clip, clip_path_on_disk, day_proxy_dir))
                     
                     valid_clips_to_add.append(clip)
                 
@@ -216,10 +212,9 @@ def process_single_sd_card(label, source_drive, format_mode, project_start_date,
                         try: clip.LinkProxyMedia(expected_proxy_path)
                         except Exception: pass
                     else:
-                        raw_queue.append((clip, expected_proxy_path))
-                        if proxy_task_queue is not None:
-                            clip_path_on_disk = os.path.join(cam_base_target_dir, clip_name)
-                            proxy_task_queue.put((clip_path_on_disk, expected_proxy_path, codec_label))
+                        # KORREKTUR: Befüllt die Queue passend für proxy_generator.py mit (clip, source_path, proxy_dir)
+                        clip_path_on_disk = os.path.join(cam_base_target_dir, clip_name)
+                        raw_queue.append((clip, clip_path_on_disk, cam_base_proxy_dir))
                     
                 valid_clips_to_add.append(clip)
             
@@ -253,8 +248,9 @@ def process_single_sd_card(label, source_drive, format_mode, project_start_date,
                     media_pool.AppendToTimeline(remaining_clips)
                     apply_drx_grading_to_timeline(pancake_timeline, base_drx_dir, camera_type, camera_mappings, log_callback)
 
-
-def run_ingest_process(format_mode, use_h265, log_callback, create_pancakes, camera_colors=None, base_drx_dir="", camera_mappings=None, base_target_dir="", base_proxy_dir=""):
+def run_ingest_process(format_mode, use_h265, log_callback, create_pancakes, 
+                       camera_colors=None, base_drx_dir="", camera_mappings=None, 
+                       base_target_dir="", base_proxy_dir="", progress_callback=None):
     """Haupt-Einstiegspunkt für den Ingest-Prozess (Orchestrator) mit Multi-Threading."""
     if camera_colors is None: camera_colors = {}
     if camera_mappings is None: camera_mappings = []
@@ -304,12 +300,10 @@ def run_ingest_process(format_mode, use_h265, log_callback, create_pancakes, cam
             log_callback("[FEHLER] Weder SD-Karten noch lokale Medien im Zielverzeichnis gefunden.")
             return
             
-        # --- PARALLELE PROXY ENGINE START ---
+        # --- PIEPLINE START ---
         global_start_time = time.perf_counter()
-        proxy_task_queue, worker_thread = init_background_proxy_engine(use_h265, log_callback)
-        
         raw_queue = []
-        log_callback("[SCHRITT 1/2] Starte parallele Ingest-Pipeline (Kopieren + Async-Rendering)...")
+        log_callback("[SCHRITT 1/2] Starte Ingest-Pipeline (Kopieren + Importieren)...")
         
         for label, source_drive in detected_sd_cards.items():
             if source_drive and not has_media_files(source_drive):
@@ -320,25 +314,20 @@ def run_ingest_process(format_mode, use_h265, log_callback, create_pancakes, cam
                 footage_dir, project_proxy_dir, current_project, media_pool, footage_bin,
                 pancakes_bin, create_pancakes, log_callback, raw_queue, camera_colors,
                 base_drx_dir, camera_mappings, trash_filepaths=trash_filepaths,
-                proxy_task_queue=proxy_task_queue, use_h265=use_h265
+                use_h265=use_h265
             )
         
-        # --- SYNCHRONISATION & WARTEN ---
+        # --- PROXY GENERIERUNG (SEQUENTIELL) ---
         if raw_queue:
-            log_callback("\n[INFO] Alle Medien kopiert und importiert. Warte auf verbleibende Hintergrund-Renderings...")
-            proxy_task_queue.put(None)  # Stopp-Signal an Worker senden
-            worker_thread.join()        # Haupt-Thread wartet hier, bis alle FFmpeg Instanzen durch sind
-            
-            # Sicheres Verknüpfen aller Proxies auf dem Haupt-Thread
-            link_finished_proxies(raw_queue, log_callback)
+            # KORREKTUR: Nutzt nun die in proxy_generator.py bereitgestellte Render-Funktion
+            render_and_link_proxies_ffmpeg(raw_queue, use_h265, log_callback)
         else:
-            proxy_task_queue.put(None)
             log_callback("\n[INFO] Keine neuen Mediendateien für Proxy-Generierung ausstehend.")
         
         # --- BENCHMARK AUSWERTUNG ---
         global_duration = time.perf_counter() - global_start_time
-        log_callback(f"\n⏱️  [BENCHMARK PARALLEL-PIPELINE]")
-        log_callback(f"    - Gesamte Laufzeit (Kopieren + Async-Rendering + Linking): {global_duration:.2f} Sek ({global_duration/60:.2f} Min)")
+        log_callback(f"\n⏱  [BENCHMARK PIPELINE]")
+        log_callback(f"    - Gesamte Laufzeit (Kopieren + Rendering + Linking): {global_duration:.2f} Sek ({global_duration/60:.2f} Min)")
         
         log_callback("\n[FERTIG] Synchronisation, Metadaten-Tagging und Proxy-Verknüpfungen beendet!")
         
