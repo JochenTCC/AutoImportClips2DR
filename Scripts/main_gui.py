@@ -222,28 +222,20 @@ class ResolveIngestGUI:
         format_mode = self.formats[selected_display_name]
         use_h265 = "H.265" in self.combo_codec.get()
         create_pancakes = self.var_create_pancakes.get()
-        
-        camera_colors = self.config.get("camera_colors", {})
-        camera_mappings = self.config.get("camera_mappings", [])
-        base_drx_dir = self.config.get("BASE_DRX_DIR", "")
-        base_target_dir = self.config.get("BASE_TARGET_DIR", "")
-        base_proxy_dir = self.config.get("BASE_PROXY_DIR", "")
 
+        # Das Entpacken der Einzelwerte entfällt hier komplett.
+        # Wir reichen self.config direkt an den Thread weiter.
         threading.Thread(
             target=run_ingest_process, 
-            args=(format_mode, use_h265, self.log, create_pancakes),
+            args=(format_mode, use_h265, self.log, create_pancakes, self.config),
             kwargs={
-                "camera_colors": camera_colors,
-                "base_drx_dir": base_drx_dir,
-                "camera_mappings": camera_mappings,
-                "base_target_dir": base_target_dir,
-                "base_proxy_dir": base_proxy_dir,
-                "progress_callback": self.update_progress  # Übergabe des Callbacks an Ingest
+                "progress_callback": self.update_progress  # Verbleibt als Keyword-Argument
             },
             daemon=True
         ).start()
         
         self.root.after(500, self.monitor_thread)
+
 
     def start_cleanup_thread(self):
         """Startet den Bereinigungsprozess in einem Hintergrundthread mit pulsierendem Balken."""
