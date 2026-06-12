@@ -302,10 +302,14 @@ class SourceIngestWorker:
                 pancake_timeline_item = item
                 break
                 
-        try: 
-            clips_to_add.sort(key=lambda c: c.GetClipProperty("Start TC"))
-        except Exception: 
-            pass
+        try:
+            clips_to_add.sort(key=lambda c: os.path.getmtime(c.GetClipProperty("File Path")))
+        except Exception as e:
+            self.log_callback(f"   [HINWEIS] Sortierung nach Dateidatum fehlgeschlagen, weiche auf Start TC aus: {e}")
+            try: 
+                clips_to_add.sort(key=lambda c: c.GetClipProperty("Start TC"))
+            except Exception: 
+                pass
         
         existing_clip_names = set()
         pancake_timeline_obj = None
