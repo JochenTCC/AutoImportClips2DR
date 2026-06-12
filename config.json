@@ -4,6 +4,8 @@
     "BASE_PROXY_DIR": "C:\\Users\\joche\\Videos\\Local\\04-DR-Folders\\ProxyMedia",
     "BASE_DRX_DIR": "C:\\Users\\joche\\Videos\\Shared\\LUTs-AND-DRX",
     
+    "GLOBAL_FALLBACK_TIMECODE": "00:00:00:00",
+
     "camera_colors": {
         "LUMIX_S5II": "Orange",
         "LUMIX_S5D": "Apricot",
@@ -22,58 +24,100 @@
             "search_keywords": ["S5II", "S5M2", "GH6"],
             "camera_type": "LUMIX_S5II",
             "input_color_space": "Panasonic V-Gamut",
-            "drx_profile": "CM-STD-S5II-VLOG.drx"
+            "drx_profile": "CM-STD-S5II-VLOG.drx",
+            "timecode_policy": {
+                "pipeline": ["embedded", "file_timestamp"],
+                "frame_fallback": "00"
+            }
         },
         {
             "search_keywords": ["S5D", "S5K"],
             "camera_type": "LUMIX_S5D",
             "input_color_space": "Panasonic V-Gamut",
-            "drx_profile": "CM-STD-S5D-VLOG.drx"
+            "drx_profile": "CM-STD-S5D-VLOG.drx",
+            "timecode_policy": {
+                "pipeline": ["embedded", "file_timestamp"],
+                "frame_fallback": "00"
+            }
         },
         {
-            "search_keywords": ["NEO2"],
-            "camera_type": "NEO2",
-            "input_color_space": "Rec.709",
-            "drx_profile": "CM-STD-Neo2-Rec709.drx"
-        },        {
-            "search_keywords": ["MINI", "MINI4", "MINI3", "M4P"],
+            "search_keywords": ["LUMIX", "VLOG", "PANASONIC"],
+            "camera_type": "LUMIX",
+            "input_color_space": "Panasonic V-Gamut",
+            "drx_profile": "CM-STD-S5II-VLOG.drx",
+            "timecode_policy": {
+                "pipeline": ["embedded", "file_timestamp"],
+                "frame_fallback": "00"
+            }
+        },
+        {
+            "search_keywords": ["MINI4", "MINI3", "Mavic"],
             "camera_type": "DJI_MINI",
-            "input_color_space": "DJI D-Gamut",
-            "drx_profile": "CM-STD-Mini4Pro-DLOG-M.drx"
+            "input_color_space": "Rec.709",
+            "drx_profile": "CM-STD-GENERIC-REC709.drx",
+            "timecode_policy": {
+                "pipeline": ["filename_regex", "embedded", "file_timestamp"],
+                "regex_pattern": "DJI_\\d{8}_(\\d{6})",
+                "frame_fallback": "00"
+            }
         },
         {
-            "search_keywords": ["AVATA2"],
+            "search_keywords": ["AVATA2", "AV2"],
             "camera_type": "DJI_AVATA2",
             "input_color_space": "DJI D-Gamut",
-            "drx_profile": "CM-STD-Avata2-DLOG-M.drx"
+            "drx_profile": "CM-STD-Avata2-DLOG-M.drx",
+            "timecode_policy": {
+                "pipeline": ["filename_regex", "embedded", "file_timestamp"],
+                "regex_pattern": "DJI_\\d{8}_(\\d{6})",
+                "frame_fallback": "00"
+            }
         },
         {
-            "search_keywords": ["AVATA360"],
+            "search_keywords": ["AVATA360", "AV360"],
             "camera_type": "DJI_AVATA360",
             "input_color_space": "DJI D-Gamut",
-            "drx_profile": "CM-STD-Avata360-DLOG-M.drx"
+            "drx_profile": "CM-STD-Avata360-DLOG-M.drx",
+            "timecode_policy": {
+                "pipeline": ["filename_regex", "embedded", "file_timestamp"],
+                "regex_pattern": "DJI_\\d{8}_(\\d{6})",
+                "frame_fallback": "00"
+            }
         },
         {
             "search_keywords": ["ACTION2", "ACT2"],
             "camera_type": "DJI_ACTION2",
             "input_color_space": "DJI D-Gamut",
-            "drx_profile": "CM-STD-DJI-DLOG-M.drx"
+            "drx_profile": "CM-STD-DJI-DLOG-M.drx",
+            "timecode_policy": {
+                "pipeline": ["filename_regex", "embedded", "file_timestamp"],
+                "regex_pattern": "DJI_\\d{8}_(\\d{6})",
+                "frame_fallback": "00"
+            }
         },
         {
             "search_keywords": ["X4", "X3", "ONE", "GO"],
             "camera_type": "INSTA",
             "input_color_space": "Rec.709",
-            "drx_profile": "CM-STD-GENERIC-REC709.drx"
+            "drx_profile": "CM-STD-GENERIC-REC709.drx",
+            "timecode_policy": {
+                "pipeline": ["filename_regex", "file_timestamp"],
+                "regex_pattern": "(?:VID|LRV)_\\d{8}_(\\d{6})",
+                "frame_fallback": "00"
+            }
         },
-    {
+        {
             "search_keywords": ["REC709", "GENERIC", "UNKNOWN"],
             "camera_type": "REC709",
             "input_color_space": "Rec.709",
-            "drx_profile": "CM-STD-GENERIC-REC709.drx"
+            "drx_profile": "CM-STD-GENERIC-REC709.drx",
+            "timecode_policy": {
+                "pipeline": ["embedded", "file_timestamp"],
+                "frame_fallback": "00"
+            }
         }
     ],
 
-    "resolution_mappings": [
+"resolution_mappings": [
         {
             "resolution": "5952x3968",
             "pancake_template": "PC-Template-6K-OG.drt"

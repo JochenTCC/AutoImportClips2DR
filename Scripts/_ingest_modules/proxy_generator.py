@@ -27,7 +27,7 @@ def render_and_link_proxies_ffmpeg(raw_queue, use_h264_or_h265, log_callback, pr
     log_callback(f"\n[SCHRITT 2/2] Starte Proxy-Generierung für {total_jobs} neue Proxies...")
     
     if use_h264_or_h265: # True für H.265
-        video_codec_args = ["-c:v", "hevc_nvenc", "-preset", "p4", "-cq", "28"]
+        video_codec_args = ["-c:v", "hevc_nvenc", "-preset", "p4", "-cq", "28", "-pix_fmt", "yuv420p"]
     else:
         video_codec_args = ["-c:v", "h264_nvenc", "-preset", "p4", "-cq", "26", "-pix_fmt", "yuv420p"]
     
@@ -37,7 +37,6 @@ def render_and_link_proxies_ffmpeg(raw_queue, use_h264_or_h265, log_callback, pr
         startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
         startupinfo.wShowWindow = 0
     
-    # --- STOPPUHR START ---
     start_time = time.perf_counter()
     
     for idx, (clip, source_path, expected_proxy_path) in enumerate(render_jobs, start=1):
@@ -49,14 +48,25 @@ def render_and_link_proxies_ffmpeg(raw_queue, use_h264_or_h265, log_callback, pr
             overall_pct = int((idx / total_jobs) * 100)
             progress_callback(min(overall_pct, 99), f"Rendere FFmpeg Proxies... ({idx}/{total_jobs})")
         
+        # --- NEU: Aktuellen Timecode aus Resolve auslesen, um Mismatch zu verhindern ---
+        clip_timecode = "00:00:00:00"
+        try:
+            target_tc = clip.GetClipProperty("Start TC")
+            if target_tc and target_tc != "":
+                clip_timecode = target_tc
+        except Exception:
+            pass
+        
         filter_str = "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2"
         
+        # Das Flag "-timecode" zwingt FFmpeg dazu, den exakt gleichen Timecode in den Proxy zu schreiben,
+        # den wir vorher in Resolve über unsere JSON-Pipeline festgelegt haben.
         cmd = [
             "ffmpeg", "-y",
-            "-hwaccel", "cuda",
             "-i", source_path,
-            "-map", "0:v",
-            "-map", "0:a?"
+            "-map", "0:v:0",
+            "-map", "0:a?",
+            "-timecode", clip_timecode  # <-- NEU: Timecode-Synchronisation
         ] + video_codec_args + [
             "-vf", filter_str,
             "-c:a", "aac",
@@ -69,6 +79,8 @@ def render_and_link_proxies_ffmpeg(raw_queue, use_h264_or_h265, log_callback, pr
                 success = clip.LinkProxyMedia(expected_proxy_path)
                 if success:
                     log_callback(f"       -> [OK] Proxy erfolgreich verknüpft.")
+                else:
+                    log_callback(f"       -> [API FEHLER] Resolve hat die Verknüpfung verweigert (Timecode-Prüfung fehlgeschlagen).")
         except subprocess.CalledProcessError as e:
             log_callback(f"       -> [FEHLER] FFmpeg-Rendering fehlgeschlagen für {clip_name}")
             if e.stderr:
@@ -76,9 +88,8 @@ def render_and_link_proxies_ffmpeg(raw_queue, use_h264_or_h265, log_callback, pr
                 for err_line in error_lines:
                     log_callback(f"          | {err_line}")
         except Exception as e:
-            log_callback(f"       -> [API FEHLER] Verknüpfung fehlgeschlagen: {e}")
+            log_callback(f"       -> [API FEHLER] Fehler beim Verknüpfen: {e}")
 
-    # --- STOPPUHR ENDE & AUSWERTUNG ---
     end_time = time.perf_counter()
     duration = end_time - start_time
     avg_per_clip = duration / total_jobs if total_jobs > 0 else 0
@@ -89,9 +100,7 @@ def render_and_link_proxies_ffmpeg(raw_queue, use_h264_or_h265, log_callback, pr
 
 
 def render_and_link_proxies_DR_Engine(raw_queue, use_h264_or_h265, log_callback, current_project=None, progress_callback=None):
-    """
-    Verarbeitet die Proxy-Queue nativ über die DaVinci Resolve Render-Engine.
-    """
+    """Verarbeitet die Proxy-Queue nativ über die DaVinci Resolve Render-Engine."""
     if not current_project:
         try:
             import DaVinciResolveScript as dvr_script

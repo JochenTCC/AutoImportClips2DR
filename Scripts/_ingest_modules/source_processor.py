@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 import os
+import re
 from datetime import datetime
 from collections import defaultdict
 
@@ -223,6 +224,94 @@ class SourceIngestWorker:
 
         return "PC-Template-4K-OG.drt", "UNKNOWN"
 
+    def _get_camera_config_for_clip(self, file_path):
+        """Sucht die passende Kamera-Konfiguration basierend auf dem Dateipfad oder Namen."""
+        if not file_path:
+            return None
+        
+        filename_upper = os.path.basename(file_path).upper()
+        path_upper = file_path.upper()
+        
+        for mapping in self.camera_mappings:
+            keywords = mapping.get("search_keywords", [])
+            for kw in keywords:
+                kw_upper = kw.upper()
+                if kw_upper in filename_upper or kw_upper in path_upper:
+                    return mapping
+        return None
+
+    def _apply_timecode_policy(self, clip, file_path):
+        """Ermittelt den Timecode gemäß JSON-Pipeline und injiziert ihn in Resolve."""
+        if not clip or not file_path:
+            return
+        
+        filename = os.path.basename(file_path)
+        cam_config = self._get_camera_config_for_clip(file_path)
+        
+        global_fallback = self.config.get("GLOBAL_FALLBACK_TIMECODE", "00:00:00:00")
+        policy = {
+            "pipeline": ["embedded", "file_timestamp"],
+            "frame_fallback": "00"
+        }
+        
+        if cam_config and "timecode_policy" in cam_config:
+            policy = cam_config["timecode_policy"]
+            
+        pipeline = policy.get("pipeline", ["embedded", "file_timestamp"])
+        frame_fallback = policy.get("frame_fallback", "00")
+        
+        chosen_tc = None
+        
+        for method in pipeline:
+            # 1. Methode: Eingebetteter nativer Timecode
+            if method == "embedded":
+                try:
+                    native_tc = clip.GetClipProperty("Start TC")
+                    if native_tc and native_tc != "00:00:00:00" and native_tc != "":
+                        chosen_tc = native_tc
+                        break
+                except Exception:
+                    pass
+            
+            # 2. Methode: Regex Extraktion aus dem Dateinamen
+            elif method == "filename_regex":
+                pattern = policy.get("regex_pattern")
+                if pattern:
+                    try:
+                        match = re.search(pattern, filename)
+                        if match:
+                            time_part = match.group(1)
+                            if len(time_part) == 6:
+                                hh = time_part[0:2]
+                                mm = time_part[2:4]
+                                ss = time_part[4:6]
+                                chosen_tc = f"{hh}:{mm}:{ss}:{frame_fallback}"
+                                break
+                    except Exception as e:
+                        self.log_callback(f"   [HINWEIS] Regex-Fehler bei {filename}: {e}")
+            
+            # 3. Methode: Dateidatum des Betriebssystems
+            elif method == "file_timestamp":
+                if os.path.exists(file_path):
+                    try:
+                        mtime = os.path.getmtime(file_path)
+                        dt = datetime.fromtimestamp(mtime)
+                        uhrzeit = dt.strftime("%H:%M:%S")
+                        chosen_tc = f"{uhrzeit}:{frame_fallback}"
+                        break
+                    except Exception:
+                        pass
+        
+        if not chosen_tc:
+            chosen_tc = global_fallback
+            
+        try:
+            success = clip.SetClipProperty("Start TC", chosen_tc)
+            if success:
+                self.log_callback(f"   [TC INJEKTION] {filename} -> Start TC auf {chosen_tc} gesetzt.")
+        except Exception as e:
+            self.log_callback(f"   [FEHLER] Konnte Timecode für {filename} nicht schreiben: {e}")
+
     def _organize_and_tag_clips(self, clips, batch_name, target_bin):
         """Phase 4: Setzt Metadaten, steuert Clip-Farben und erstellt Pancake-Timelines auf Template-Basis."""
         self.log_callback(f"   -> [METADATEN & ORGANISATION] Tagge Clips und generiere Profile...")
@@ -302,13 +391,26 @@ class SourceIngestWorker:
                 pancake_timeline_item = item
                 break
                 
-        try:
-            clips_to_add.sort(key=lambda c: os.path.getmtime(c.GetClipProperty("File Path")))
-        except Exception as e:
-            self.log_callback(f"   [HINWEIS] Sortierung nach Dateidatum fehlgeschlagen, weiche auf Start TC aus: {e}")
-            try: 
-                clips_to_add.sort(key=lambda c: c.GetClipProperty("Start TC"))
-            except Exception: 
+        # 1. Vorbereitung: Neue Timecode-Richtlinien auf alle Clips anwenden
+        self.log_callback("   -> Analysiere Kamera-Pipelines und bereite Timecodes vor...")
+        for clip in clips_to_add:
+            if not clip: continue
+            try:
+                file_path = clip.GetClipProperty("File Path")
+                if file_path:
+                    self._apply_timecode_policy(clip, file_path)
+            except Exception as e:
+                self.log_callback(f"   [FEHLER] Fehler bei Timecode-Vorbereitung für Clip: {e}")
+
+        # 2. Chronologische Sortierung auf Basis des frisch gesetzten "Start TC"
+        try: 
+            clips_to_add.sort(key=lambda c: c.GetClipProperty("Start TC"))
+            self.log_callback("   [SORTIERUNG] Clips erfolgreich chronologisch nach 'Start TC' sortiert.")
+        except Exception as e: 
+            self.log_callback(f"   [WARNUNG] Sortierung nach 'Start TC' fehlgeschlagen ({e}). Weiche auf Dateidatum aus.")
+            try:
+                clips_to_add.sort(key=lambda c: os.path.getmtime(c.GetClipProperty("File Path")))
+            except Exception:
                 pass
         
         existing_clip_names = set()
