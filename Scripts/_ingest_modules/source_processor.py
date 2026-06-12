@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 import os
 from datetime import datetime
+from collections import defaultdict
 
 from .config import PROXY_ELIGIBLE_EXTENSIONS, WEEKDAYS_DE
 from .utils import get_media_dates_from_card, get_media_files_from_dir, get_media_files_flattened
@@ -40,6 +41,7 @@ class SourceIngestWorker:
         self.camera_colors = config.get("camera_colors", {})
         self.camera_mappings = config.get("camera_mappings", [])
         self.base_drx_dir = config.get("BASE_DRX_DIR", "")
+        self.resolution_mappings = config.get("resolution_mappings", {})
 
         # Clip-Farbe über die Hilfsfunktion bestimmen
         self.clip_color = get_clip_color_by_label(label, self.camera_colors)
@@ -195,11 +197,36 @@ class SourceIngestWorker:
         self.log_callback(f"   -> [RESOLVE INGEST] Importiere {len(file_paths)} Dateien in Bin '{target_bin.GetName()}'...")
         return self.media_pool.ImportMedia(file_paths)
 
+    def _get_resolution_mapping_data(self, clip):
+        """Ermittelt die Auflösung des Clips und extrahiert den Template-Dateinamen sowie ein Suffix."""
+        raw_res = ""
+        try:
+            raw_res = clip.GetClipProperty("Resolution")
+        except Exception as e:
+            self.log_callback(f"   [WARNUNG] Konnte 'Resolution' nicht auslesen: {e}")
+        
+        raw_res = str(raw_res).strip()
+        
+        # 1. Exakter Match in JSON-Konfiguration
+        for mapping in self.resolution_mappings:
+            if mapping.get("resolution") == raw_res:
+                tpl = mapping.get("pancake_template", "")
+                sfx = tpl.replace("PC-Template-", "").replace(".drt", "") if tpl else raw_res
+                return tpl, sfx
+
+        # 2. Fallback auf "UNKNOWN"
+        for mapping in self.resolution_mappings:
+            if mapping.get("resolution") == "UNKNOWN":
+                tpl = mapping.get("pancake_template", "")
+                sfx = tpl.replace("PC-Template-", "").replace(".drt", "") if tpl else "UNKNOWN"
+                return tpl, sfx
+
+        return "PC-Template-4K-OG.drt", "UNKNOWN"
+
     def _organize_and_tag_clips(self, clips, batch_name, target_bin):
-        """Phase 4: Setzt Metadaten, steuert Clip-Farben und erstellt Pancake-Timelines."""
+        """Phase 4: Setzt Metadaten, steuert Clip-Farben und erstellt Pancake-Timelines auf Template-Basis."""
         self.log_callback(f"   -> [METADATEN & ORGANISATION] Tagge Clips und generiere Profile...")
         
-        # Behoben: camera_type und log_callback werden jetzt korrekt übergeben
         tag_media_pool_items(clips, self.camera_type, self.log_callback)
         
         for clip in clips:
@@ -213,13 +240,113 @@ class SourceIngestWorker:
                     pass
 
         if self.create_pancakes and self.pancakes_bin:
-            if batch_name != "Flat-Import":
-                day_pancake_bin = get_or_create_bin(self.media_pool, self.pancakes_bin, batch_name)
-                timeline_name = f"PC_{batch_name}_{self.camera_type}"
-                self._create_or_extend_pancake_timeline(timeline_name, clips, day_pancake_bin)
-            else:
-                timeline_name = f"PC_FLAT_{self.camera_type}"
-                self._create_or_extend_pancake_timeline(timeline_name, clips, self.pancakes_bin)
+            clips_by_template = defaultdict(list)
+            for clip in clips:
+                if not clip: continue
+                tpl_name, suffix = self._get_resolution_mapping_data(clip)
+                clips_by_template[(tpl_name, suffix)].append(clip)
+            
+            for (tpl_name, suffix), res_clips in clips_by_template.items():
+                if batch_name != "Flat-Import":
+                    day_pancake_bin = get_or_create_bin(self.media_pool, self.pancakes_bin, batch_name)
+                    timeline_name = f"PC_{batch_name}_{self.camera_type}_{suffix}"
+                    self._create_or_extend_pancake_timeline(timeline_name, tpl_name, res_clips, day_pancake_bin)
+                else:
+                    timeline_name = f"PC_FLAT_{self.camera_type}_{suffix}"
+                    self._create_or_extend_pancake_timeline(timeline_name, tpl_name, res_clips, self.pancakes_bin)
+
+    def _duplicate_template_timeline(self, template_name, target_bin, new_name):
+        """Lädt eine physische .drt-Datei direkt aus dem DRX-Verzeichnis und benennt sie um."""
+        if not self.base_drx_dir:
+            self.log_callback(f"   [FEHLER] BASE_DRX_DIR ist in der Konfiguration leer oder fehlt.")
+            return None
+
+        # Da der Dateiname in der JSON bereits komplett mit Endung hinterlegt ist, hängen wir nichts an
+        drt_path = os.path.join(self.base_drx_dir, template_name)
+        
+        if not os.path.exists(drt_path):
+            self.log_callback(f"   [FEHLER] Physische Template-Datei existiert nicht: '{drt_path}'")
+            return None
+            
+        try:
+            self.media_pool.SetCurrentFolder(target_bin)
+            imported_timeline = self.media_pool.ImportTimelineFromFile(drt_path)
+            
+            target_tl = imported_timeline if (imported_timeline and not isinstance(imported_timeline, bool)) else self.current_project.GetCurrentTimeline()
+            
+            if target_tl:
+                if target_tl.SetName(new_name):
+                    return target_tl
+            
+            # Fallback-Suche im Projekt, falls die API die Timeline nicht direkt zurückgibt
+            possible_names = [template_name, os.path.splitext(template_name)[0]]
+            for i in range(1, self.current_project.GetTimelineCount() + 1):
+                tl = self.current_project.GetTimelineByIndex(i)
+                if tl and tl.GetName() in possible_names:
+                    tl.SetName(new_name)
+                    return tl
+                    
+            return target_tl
+            
+        except Exception as e:
+            self.log_callback(f"   [FEHLER] Ausnahme bei Import von physischem Template: {e}")
+            return None
+
+    def _create_or_extend_pancake_timeline(self, timeline_name, template_name, clips_to_add, target_pancake_bin):
+        """Überprüft die Existenz der Pancake-Timeline, importiert das Template bei Bedarf und hängt Clips an."""
+        self.media_pool.SetCurrentFolder(target_pancake_bin)
+        pancake_timeline_item = None
+        
+        for item in target_pancake_bin.GetClipList():
+            if item and item.GetClipProperty("Type") == "Timeline" and item.GetName() == timeline_name:
+                pancake_timeline_item = item
+                break
+                
+        try: 
+            clips_to_add.sort(key=lambda c: c.GetClipProperty("Start TC"))
+        except Exception: 
+            pass
+        
+        existing_clip_names = set()
+        pancake_timeline_obj = None
+        
+        if pancake_timeline_item:
+            # Holt das echte Timeline-Objekt aus dem Projekt, um die Clips der Spur auszulesen
+            for i in range(1, self.current_project.GetTimelineCount() + 1):
+                tl = self.current_project.GetTimelineByIndex(i)
+                if tl and tl.GetName() == timeline_name:
+                    pancake_timeline_obj = tl
+                    break
+            if pancake_timeline_obj:
+                try:
+                    raw_items = pancake_timeline_obj.GetItemListInTrack("video", 1)
+                    for item in (raw_items if raw_items else []):
+                        mp_item = item.GetMediaPoolItem()
+                        if mp_item: 
+                            existing_clip_names.add(mp_item.GetName())
+                except Exception: 
+                    pass
+            
+        clips_to_append = [c for c in clips_to_add if c.GetName() not in existing_clip_names]
+        if not clips_to_append: 
+            return
+            
+        if not pancake_timeline_item:
+            self.log_callback(f"   -> Importiere externes Template '{template_name}' von Festplatte...")
+            pancake_timeline_obj = self._duplicate_template_timeline(template_name, target_pancake_bin, timeline_name)
+            
+            if not pancake_timeline_obj:
+                self.log_callback(f"   [WARNUNG] DRT-Import fehlgeschlagen. Erzeuge leere Standard-Timeline.")
+                pancake_timeline_obj = self.media_pool.CreateTimelineFromClips(timeline_name, [clips_to_append[0]])
+                clips_to_append = clips_to_append[1:]
+        
+        if pancake_timeline_obj and clips_to_append:
+            try:
+                self.current_project.SetCurrentTimeline(pancake_timeline_obj)
+                self.media_pool.AppendToTimeline(clips_to_append)
+                apply_drx_grading_to_timeline(pancake_timeline_obj, self.base_drx_dir, self.camera_type, self.camera_mappings, self.log_callback)
+            except Exception as e:
+                self.log_callback(f"   [FEHLER] Clips konnten nicht an Timeline angehängt werden: {e}")
 
     def _queue_eligible_proxies(self, clips, sub_proxy_dir):
         """Phase 5: Filtert clips auf Video-Container und schiebt sie in das globale Render-Array."""
@@ -242,48 +369,6 @@ class SourceIngestWorker:
                 
         if queued_count > 0:
             self.log_callback(f"   -> [QUEUE] {queued_count} Clip(s) für FFmpeg-Proxy-Pipeline registriert.")
-
-    def _create_or_extend_pancake_timeline(self, timeline_name, clips_to_add, target_pancake_bin):
-        """Private Hilfsfunktion zur Erstellung/Erweiterung strukturierter Pancake-Schnittspuren."""
-        self.media_pool.SetCurrentFolder(target_pancake_bin)
-        pancake_timeline = None
-        
-        for item in target_pancake_bin.GetClipList():
-            if item.GetClipProperty("Type") == "Timeline" and item.GetName() == timeline_name:
-                pancake_timeline = item
-                break
-                
-        try: 
-            clips_to_add.sort(key=lambda c: c.GetClipProperty("Start TC"))
-        except Exception: 
-            pass
-        
-        existing_clip_names = set()
-        if pancake_timeline:
-            try:
-                raw_items = pancake_timeline.GetItemListInTrack("video", 1)
-                for item in (raw_items if raw_items else []):
-                    mp_item = item.GetMediaPoolItem()
-                    if mp_item: 
-                        existing_clip_names.add(mp_item.GetName())
-            except Exception: 
-                pass
-            
-        clips_to_append = [c for c in clips_to_add if c.GetName() not in existing_clip_names]
-        if not clips_to_append: 
-            return
-            
-        if not pancake_timeline:
-            pancake_timeline = self.media_pool.CreateTimelineFromClips(timeline_name, [clips_to_append[0]])
-            remaining = clips_to_append[1:]
-        else:
-            remaining = clips_to_append
-            
-        if pancake_timeline and remaining:
-            self.current_project.SetCurrentTimeline(pancake_timeline)
-            self.media_pool.AppendToTimeline(remaining)
-            # NEU & Behoben: Wendet das DRX-Grading auf die Pancake-Timeline an
-            apply_drx_grading_to_timeline(pancake_timeline, self.base_drx_dir, self.camera_type, self.camera_mappings, self.log_callback)
 
 
 def ingest_media_source(*args, **kwargs):

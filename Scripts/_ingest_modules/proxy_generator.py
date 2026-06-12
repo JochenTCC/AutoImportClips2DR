@@ -56,7 +56,7 @@ def render_and_link_proxies_ffmpeg(raw_queue, use_h264_or_h265, log_callback, pr
             "-hwaccel", "cuda",
             "-i", source_path,
             "-map", "0:v",
-            "-map", "0:a"
+            "-map", "0:a?"
         ] + video_codec_args + [
             "-vf", filter_str,
             "-c:a", "aac",
