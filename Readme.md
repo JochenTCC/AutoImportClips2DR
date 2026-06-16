@@ -17,7 +17,7 @@ Dieses Readme wurde mit Gemini erstellt und dann manuell angepasst.
 * **Automatisches DRX-Grading (Resolve 19+)**: Wendet hinterlegte Look-Profile (`.drx`) vollautomatisch über die moderne `NodeGraph`-Schnittstelle auf alle importierten Clips der Timeline an.
 * **Generischer Fallback (Rec.709)**: Unbekannte Speicherkarten stürzen nicht ab, sondern werden als generisches `REC709` eingestuft, erhalten eine weiße Clipfarbe und ein definiertes Standard-Mapping.
 * **Workflow-optimierte GUI**: Die Standardwerte der Oberfläche sind praxisnah vorbelegt (Pancake-Timelines standardmäßig aktiv, Farbraumzuweisung via Skript inaktiv).
-* **Automatischer UI-Wechsel**: Schaltet die Resolve-Oberfläche nach erfolgreichem Ingest sofort auf die **Edit-Page** um, damit der Schnitt direkt starten kann.
+* **Aussortieren von Trash**: Nach Sichten der Pancake-Timelines kann das Footage-Bin von allen Clips "gereinigt" werden, die nicht genutzt werden. Die ungenutzten Clips landen in einem separaten Bin (_Trash)
 
 ---
 
@@ -124,5 +124,10 @@ Passe die Datei `config.json` im Hauptverzeichnis an deine lokale Laufwerksstruk
 * **Edit-Page Ready**: Da das Skript nach getaner Arbeit direkt auf die Edit-Page umschaltet, empfiehlt es sich, das "Pancake"-Prinzip (Timeline über Timeline) zu nutzen, um das sortierte Material extrem schnell in die Master-Timeline zu ziehen.
 
 ## Offene Todos
-* Die Std-Node-Trees müssen noch vervollständigt werden bzgl. benutzter Kameras und Nodes für Kamera-Korrektur (und besserer Formatierung)
-* Das DR-Projekt zur Erstellung der Std-Node-Trees muss noch ordentlich befüllt werden mit Testaufnahmen der Kameras (für Korrektur)
+* Die Std-Node-Trees müssen noch vervollständigt werden bzgl. Nodes für Kamera-Korrektur (und besserer Formatierung).
+* Das DR-Projekt zur Erstellung der Std-Node-Trees muss noch ordentlich befüllt werden mit Testaufnahmen der Kameras (für Korrektur).
+* Die _Trash-Funktionalität muss noch getestet werden.
+* Ein Workflow für 360°-Kameras erarbeiten:
+ * Unframed Raw Material wird in das Unterverzeichnis kopiert (z.B.: .\Avata360\260606\Unframed)
+ * Das Reframing wird mit der entsprechenden Software gemacht und des Ergebnis in den "eigentlichen" Ordner gepackt (z.B.: .\Avata360\260606)
+ * Wie wird aus den geframten Clips eine Pancake-Timeline? Nach Einfügen in Pancake-Timeline Color-Grading zuweisen.
