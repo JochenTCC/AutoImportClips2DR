@@ -64,7 +64,10 @@ AutoImportClips2DR/
 
 Damit das Skript direkt aus Resolve heraus gestartet werden kann, platziere den gesamten Projektordner oder eine Verknüpfung der `Start_Ingest.py` im DaVinci Resolve Skriptverzeichnis:
 
-* **Windows**: `C:\Users\<Dein_User>\AppData\Roaming\Blackmagic Design\DaVinci Resolve\Support\Developer\Scripting\WorkflowIntegration\`
+* **Windows:** %APPDATA%\Blackmagic Design\DaVinci Resolve\Support\Fusion\Scripts\Utility
+(also C:\Users\<Name>\AppData\Roaming\Blackmagic Design\DaVinci Resolve\Support\Fusion\Scripts\Utility)
+* **macOS:** ~/Library/Application Support/Blackmagic Design/DaVinci Resolve/Fusion/Scripts/Utility
+* **Linux:** ~/.local/share/DaVinciResolve/Fusion/Scripts/Utility
 
 ### 2. Konfiguration der Pfade & Kameras (`config.json`)
 
